@@ -1,0 +1,6 @@
+.pio/
+.vscode/
+*.bin
+!docs/**/*.bin
+.DS_Store
+Thumbs.db
