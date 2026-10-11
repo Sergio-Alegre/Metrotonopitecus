@@ -27,14 +27,44 @@ Objetivo: validar la cadena completa antes de escribir nada de la app real.
 
 Metrónomo, afinador, detección de frecuencia, menús, ajustes persistentes.
 
-## Fase 1 — Metrónomo (por definir)
+## Fase 1 — Interfaz y modos (primer esqueleto)
 
-BPM ajustable por teclado, click audible, indicación visual del pulso. Detalles a decidir con Sergio.
+Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interfaz silenciosa.
 
-## Fase 2 — Afinador (por definir)
+### Estructura
 
-Captura con el micrófono, detección de frecuencia fundamental, nota más cercana y desviación en cents.
-Detalles a decidir con Sergio.
+- Barra inferior de una línea de texto + línea de 1 px encima: `M:Metro T:Tuner G:Game A:About`, modo
+  activo resaltado, volumen a la derecha.
+- Teclas globales: `M` metrónomo, `T` afinador, `G` juego, `A` extra (nombre por decidir; de momento "About").
+- Volumen global (clic del metrónomo y nota de referencia): `-`/`_` baja, `=`/`+` sube.
+- Cursores = teclas `;` (arriba) `,` (izquierda) `.` (abajo) `/` (derecha), con o sin Fn.
+- Se persisten en NVS: volumen, BPM, subdivisión, nota objetivo y La de referencia.
+
+### Metrónomo (genérico, a moldear)
+
+- Dígitos: teclean BPM (Enter confirma, Del borra). Arriba/abajo: BPM ±1 (mantener = repetición).
+- Izquierda/derecha: subdivisión (1, 2, 3 = tresillo, 4 por pulso). Espacio: arrancar/parar.
+- Compás fijo de 4 pulsos con acento en el primero (de momento).
+
+### Afinador
+
+- Aguja sobre un arco de ~100° (estilo polímetro analógico), centro = nota correcta, franja verde ±5 cents,
+  escala ±50 cents.
+- Arriba/abajo: La de referencia en Hz (por defecto 442, rango 400–480, persistente, visible en pantalla).
+- Izquierda/derecha: nota objetivo en saltos de semitono, octavas 3 a 5 (C3–B5).
+- Espacio o `P`: drone (onda senoidal) a la frecuencia de la nota objetivo.
+- Detección: micrófono, autocorrelación normalizada restringida a ±2 semitonos de la nota objetivo.
+  En el ADV micrófono y altavoz comparten reloj I2S: con el drone sonando la detección se pausa.
+
+### Juego (Snake básico)
+
+- Cursores giran la cabeza; tubo verde; puntos rojos; muere con pared o con su cuerpo.
+- Al morir parpadea la puntuación; cualquier tecla reinicia. Sin sonido.
+
+## Fase 2 — Afinador, refinamiento (por definir)
+
+Precisión de la detección, estabilidad de la aguja, sensibilidad del micrófono. Pendiente de pruebas en el
+dispositivo.
 
 ## Preguntas abiertas
 

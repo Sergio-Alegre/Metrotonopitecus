@@ -29,3 +29,13 @@ a través de Launcher: WebUI (opción WUI de Launcher, subida desde el navegador
 - No añadir dependencias sin decirlo. Fijar versiones de librerías en `platformio.ini`.
 - Claude no puede oír el altavoz ni ver la pantalla: lo que se pueda verificar, que salga por serie.
 - El diseño y los criterios de aceptación viven en `docs/SPEC.md`. Leerlo antes de trabajar.
+
+## Interfaz del firmware
+
+- **Todo el texto que muestra el firmware (pantalla y serie) va siempre en inglés**, aunque Sergio
+  describa la funcionalidad en español. Esto incluye etiquetas, mensajes, nombres de modos y logs.
+- **La interfaz es silenciosa**: sin pitidos al pulsar teclas ni sonidos en menús o juegos, para evitar
+  disparos accidentales en ensayos. Solo suena lo musical: clic del metrónomo y nota de referencia (drone).
+- Barra inferior fija de una línea de texto (con una línea de 1 px encima) para los modos; el resto
+  de la pantalla es del modo activo. Teclas globales: `M` metrónomo, `T` afinador, `G` juego, `A` extra;
+  `-`/`_` y `=`/`+` bajan/suben el volumen global (se aceptan ambas variantes para no necesitar Shift).
