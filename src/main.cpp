@@ -1,55 +1,119 @@
-// Phase 0: hello world through the final toolchain (PlatformIO -> Launcher).
-// Shows a title and the last key pressed, beeps at 440 Hz on key press,
-// and mirrors everything on the serial port.
+// Metrotonopitecus: metronome, tuner and a small game for the Cardputer ADV.
+// The whole interface is silent except for musical sound (metronome click,
+// tuner drone). All on-screen and serial text is English.
 #include <M5Cardputer.h>
 
-static constexpr int kBeepHz = 440;
-static constexpr int kBeepMs = 80;
+#include "audio.h"
+#include "input.h"
+#include "modes.h"
+#include "settings.h"
+#include "ui.h"
 
-static String lastKey = "-";
+namespace {
 
-static void draw() {
+constexpr int kCharW = 6;  // Font0 advance at size 1
+constexpr int kBarGap = 8;
+
+M5Canvas canvas(&M5Cardputer.Display);
+
+Mode* modes[] = {
+    &aboutMode(),
+};
+constexpr size_t kModeCount = sizeof(modes) / sizeof(modes[0]);
+
+Mode* current = nullptr;
+bool forceRedraw = true;
+
+void drawBar() {
     auto& d = M5Cardputer.Display;
-    d.fillScreen(BLACK);
-    d.setTextDatum(top_left);
-    d.setTextColor(GREEN);
+    const int y = ui::kContentH;
+    d.fillRect(0, y, ui::kScreenW, ui::kBarH, BLACK);
+    d.drawFastHLine(0, y, ui::kScreenW, DARKGREY);
+
+    d.setFont(&fonts::Font0);
     d.setTextSize(1);
-    d.drawString("Hello Metrotonopitecus", 4, 8);
-    d.setTextColor(WHITE);
-    d.drawString("Last key:", 4, 40);
-    d.setTextSize(2);
-    d.setTextColor(YELLOW);
-    d.drawString(lastKey, 4, 60);
+    d.setTextDatum(top_left);
+
+    int x = 2;
+    for (Mode* m : modes) {
+        String text = String((char)toupper(m->hotkey())) + ":" + m->label();
+        const int w = text.length() * kCharW;
+        if (m == current) {
+            d.fillRect(x - 2, y + 1, w + 4, ui::kBarH - 1, WHITE);
+            d.setTextColor(BLACK, WHITE);
+        } else {
+            d.setTextColor(LIGHTGREY, BLACK);
+        }
+        d.drawString(text, x, y + 2);
+        x += w + kBarGap;
+    }
+
+    String vol = "Vol " + String(settings::get().volume);
+    d.setTextColor(CYAN, BLACK);
+    d.drawString(vol, ui::kScreenW - (int)vol.length() * kCharW - 2, y + 2);
 }
 
-static String describe(const Keyboard_Class::KeysState& st) {
-    String s;
-    for (char c : st.word) s += c;
-    if (st.enter) s += "<enter>";
-    if (st.del) s += "<del>";
-    if (st.tab) s += "<tab>";
-    if (st.space && s.isEmpty()) s += "<space>";
-    return s;
+void switchTo(Mode* next) {
+    if (next == current) return;
+    if (current) current->leave();
+    current = next;
+    current->enter();
+    forceRedraw = true;
+    drawBar();
+    Serial.printf("[mode] %s\n", current->label());
 }
+
+void changeVolume(int delta) {
+    auto& s = settings::get();
+    int v = constrain(s.volume + delta, 0, settings::kMaxVolume);
+    if (v == s.volume) return;
+    s.volume = v;
+    audio::setVolumeLevel(v);
+    settings::touch();
+    drawBar();
+    Serial.printf("[volume] %d/%d\n", v, settings::kMaxVolume);
+}
+
+void handleKey(const KeyEvent& e) {
+    if (e.key == Key::Char) {
+        if (e.ch == '-' || e.ch == '_') return changeVolume(-1);
+        if (e.ch == '=' || e.ch == '+') return changeVolume(+1);
+        for (Mode* m : modes) {
+            if (m->hotkey() == e.ch) return switchTo(m);
+        }
+    }
+    current->onKey(e);
+}
+
+}  // namespace
 
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
     M5Cardputer.Display.setRotation(1);
-    M5Cardputer.Speaker.setVolume(128);
+    M5Cardputer.Display.fillScreen(BLACK);
 
-    Serial.println("Hello Metrotonopitecus");
-    draw();
+    canvas.setColorDepth(16);
+    canvas.createSprite(ui::kScreenW, ui::kContentH);
+
+    settings::load();
+    audio::begin();
+
+    Serial.println("Metrotonopitecus ready");
+    switchTo(modes[0]);
 }
 
 void loop() {
     M5Cardputer.update();
-    if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-        String k = describe(M5Cardputer.Keyboard.keysState());
-        if (k.isEmpty()) k = "(modifier)";
-        lastKey = k;
-        M5Cardputer.Speaker.tone(kBeepHz, kBeepMs);
-        Serial.printf("key: %s -> beep %d Hz\n", lastKey.c_str(), kBeepHz);
-        draw();
-    }
+    input::poll();
+
+    KeyEvent e;
+    while (input::next(e)) handleKey(e);
+
+    settings::tick();
+    current->update();
+    if (current->draw(canvas, forceRedraw)) canvas.pushSprite(0, 0);
+    forceRedraw = false;
+
+    delay(4);
 }
