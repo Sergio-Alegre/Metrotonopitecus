@@ -3,4 +3,5 @@
 
 Mode& metronomeMode();
 Mode& tunerMode();
+Mode& snakeMode();
 Mode& aboutMode();
