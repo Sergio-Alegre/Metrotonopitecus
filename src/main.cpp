@@ -17,6 +17,7 @@ constexpr int kBarGap = 8;
 M5Canvas canvas(&M5Cardputer.Display);
 
 Mode* modes[] = {
+    &metronomeMode(),
     &aboutMode(),
 };
 constexpr size_t kModeCount = sizeof(modes) / sizeof(modes[0]);

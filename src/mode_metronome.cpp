@@ -1,0 +1,231 @@
+// Generic metronome (key M).
+//   digits        type BPM (Enter confirms, Del erases, 3 digits auto-confirm)
+//   Up / Down     BPM +1 / -1 (hold to repeat)
+//   Left / Right  subdivision: quarters, eighths, triplets, sixteenths
+//   Space         start / stop
+//
+// Click timing runs in its own task so that redrawing the screen in the main
+// loop (~15 ms per frame) never shifts a click.
+#include <atomic>
+
+#include <esp_timer.h>
+
+#include "audio.h"
+#include "modes.h"
+#include "settings.h"
+
+namespace {
+
+constexpr int kBeatsPerBar = 4;
+constexpr uint32_t kEntryTimeoutMs = 3000;
+
+std::atomic<bool> gRunning{false};
+std::atomic<int> gBpm{100};
+std::atomic<int> gSub{1};
+std::atomic<uint32_t> gSeq{0};  // clicks fired since boot
+std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
+
+const char* kSubNames[] = {"", "Quarters", "Eighths", "Triplets", "Sixteenths"};
+
+void fireClick(int idx, int sub) {
+    if (idx == 0) {
+        audio::click(1800.0f, 30);  // bar accent
+    } else if (idx % sub == 0) {
+        audio::click(1200.0f, 25);  // beat
+    } else {
+        audio::click(800.0f, 15);   // subdivision
+    }
+}
+
+void engineTask(void*) {
+    int idx = 0;
+    int64_t next = 0;
+    bool wasRunning = false;
+    for (;;) {
+        if (!gRunning.load()) {
+            wasRunning = false;
+            vTaskDelay(pdMS_TO_TICKS(5));
+            continue;
+        }
+        if (!wasRunning) {
+            wasRunning = true;
+            idx = 0;
+            next = esp_timer_get_time();
+        }
+        // Sleep coarsely, then spin for the last stretch to hit the target time.
+        while (gRunning.load() && next - esp_timer_get_time() > 1500) vTaskDelay(1);
+        if (!gRunning.load()) continue;
+        while (esp_timer_get_time() < next) {
+        }
+
+        const int sub = gSub.load();
+        const int ticksPerBar = kBeatsPerBar * sub;
+        if (idx >= ticksPerBar) idx = 0;  // subdivision changed mid-bar
+        fireClick(idx, sub);
+        gTickIdx.store(idx);
+        gSeq.fetch_add(1);
+        idx = (idx + 1) % ticksPerBar;
+
+        next += 60000000LL / ((int64_t)gBpm.load() * sub);
+    }
+}
+
+class MetronomeMode : public Mode {
+public:
+    char hotkey() const override { return 'm'; }
+    const char* label() const override { return "Metro"; }
+
+    void enter() override {
+        static bool started = false;
+        if (!started) {
+            started = true;
+            xTaskCreatePinnedToCore(engineTask, "metronome", 4096, nullptr, 3, nullptr, 0);
+        }
+        gBpm.store(settings::get().bpm);
+        gSub.store(settings::get().subdivision);
+        gRunning.store(false);
+        entry_ = "";
+        lastSeq_ = gSeq.load();
+        dirty_ = true;
+    }
+
+    void leave() override {
+        gRunning.store(false);
+        entry_ = "";
+    }
+
+    void onKey(const KeyEvent& e) override {
+        switch (e.key) {
+            case Key::Char:
+                if (e.ch >= '0' && e.ch <= '9' && entry_.length() < 3) {
+                    entry_ += e.ch;
+                    entryAt_ = millis();
+                    if (entry_.length() == 3) commitEntry();
+                }
+                break;
+            case Key::Enter:
+                commitEntry();
+                break;
+            case Key::Del:
+                if (entry_.length()) entry_.remove(entry_.length() - 1);
+                break;
+            case Key::Up:
+                commitEntry();
+                setBpm(settings::get().bpm + 1);
+                break;
+            case Key::Down:
+                commitEntry();
+                setBpm(settings::get().bpm - 1);
+                break;
+            case Key::Left:
+                commitEntry();
+                setSub(settings::get().subdivision - 1);
+                break;
+            case Key::Right:
+                commitEntry();
+                setSub(settings::get().subdivision + 1);
+                break;
+            case Key::Space:
+                commitEntry();
+                gRunning.store(!gRunning.load());
+                Serial.printf("[metro] %s at %d BPM\n", gRunning.load() ? "start" : "stop", settings::get().bpm);
+                break;
+        }
+        dirty_ = true;
+    }
+
+    void update() override {
+        if (entry_.length() && millis() - entryAt_ > kEntryTimeoutMs) {
+            commitEntry();
+            dirty_ = true;
+        }
+        const uint32_t seq = gSeq.load();
+        if (seq != lastSeq_) {
+            lastSeq_ = seq;
+            dirty_ = true;
+        }
+    }
+
+    bool draw(M5Canvas& c, bool force) override {
+        if (!dirty_ && !force) return false;
+        dirty_ = false;
+
+        const auto& s = settings::get();
+        const bool running = gRunning.load();
+
+        c.fillSprite(BLACK);
+        c.setFont(&fonts::Font0);
+        c.setTextSize(1);
+        c.setTextDatum(top_left);
+        c.setTextColor(DARKGREY);
+        c.drawString("Metronome", 4, 3);
+        c.setTextDatum(top_right);
+        c.setTextColor(running ? GREEN : RED);
+        c.drawString(running ? "RUNNING" : "STOPPED", 236, 3);
+
+        // Tempo
+        const bool typing = entry_.length() > 0;
+        c.setFont(&fonts::Font7);
+        c.setTextDatum(middle_center);
+        c.setTextColor(typing ? YELLOW : WHITE);
+        c.drawString(typing ? entry_ : String(s.bpm), 120, 38);
+
+        c.setFont(&fonts::Font0);
+        c.setTextColor(typing ? YELLOW : LIGHTGREY);
+        c.drawString(typing ? "BPM - Enter to set" : "BPM", 120, 70);
+
+        // Beats of the bar
+        const int sub = s.subdivision;
+        int beat = running ? gTickIdx.load() / sub : -1;
+        if (beat >= kBeatsPerBar) beat = kBeatsPerBar - 1;
+        for (int i = 0; i < kBeatsPerBar; ++i) {
+            const int x = 60 + 40 * i;
+            const uint16_t col = (i == 0) ? RED : GREEN;
+            if (i == beat) {
+                c.fillCircle(x, 88, 9, col);
+            } else {
+                c.drawCircle(x, 88, 9, DARKGREY);
+            }
+        }
+
+        // Subdivision
+        c.setFont(&fonts::Font2);
+        c.setTextDatum(middle_center);
+        c.setTextColor(CYAN);
+        c.drawString(String("<  ") + kSubNames[sub] + "  >", 120, 112);
+        return true;
+    }
+
+private:
+    void commitEntry() {
+        if (!entry_.length()) return;
+        setBpm(entry_.toInt());
+        entry_ = "";
+    }
+
+    void setBpm(int bpm) {
+        auto& s = settings::get();
+        s.bpm = constrain(bpm, settings::kMinBpm, settings::kMaxBpm);
+        gBpm.store(s.bpm);
+        settings::touch();
+    }
+
+    void setSub(int sub) {
+        auto& s = settings::get();
+        s.subdivision = constrain(sub, 1, 4);
+        gSub.store(s.subdivision);
+        settings::touch();
+    }
+
+    String entry_;
+    uint32_t entryAt_ = 0;
+    uint32_t lastSeq_ = 0;
+    bool dirty_ = true;
+};
+
+}  // namespace
+
+Mode& metronomeMode() {
+    static MetronomeMode mode;
+    return mode;
+}
