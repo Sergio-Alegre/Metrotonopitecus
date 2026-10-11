@@ -78,6 +78,8 @@ bool micStart() {
 
 void micStop() {
     if (!micActive) return;
+    // As in the official M5 example: let the capture in flight finish first.
+    for (int i = 0; i < 300 && M5Cardputer.Mic.isRecording(); ++i) delay(1);
     M5Cardputer.Mic.end();
     micActive = false;
     delay(30);  // let the codec settle before the speaker path is brought back up

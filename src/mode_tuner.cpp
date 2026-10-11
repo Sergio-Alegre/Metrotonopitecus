@@ -221,6 +221,22 @@ public:
         c.setTextDatum(top_right);
         c.setTextColor(drone ? CYAN : DARKGREY);
         c.drawString(drone ? "Space: stop drone" : "Space: drone", 236, 115);
+
+#ifdef TUNER_DEBUG
+        c.setFont(&fonts::Font0);
+        c.setTextDatum(top_left);
+        c.setTextColor(ORANGE);
+        char dbg[48];
+        snprintf(dbg, sizeof(dbg), "frames=%u recfail=%u", (unsigned)dbgFrames_, (unsigned)dbgRecFails_);
+        c.drawString(dbg, 4, 44);
+        snprintf(dbg, sizeof(dbg), "rms=%.0f peak=%d", dbgRms_, dbgPeak_);
+        c.drawString(dbg, 4, 53);
+        snprintf(dbg, sizeof(dbg), "valid=%d f=%.1f clar=%.2f", (int)dbgValid_, dbgFreq_, dbgClarity_);
+        c.drawString(dbg, 4, 62);
+        snprintf(dbg, sizeof(dbg), "mic=%d spk=%d play=%d drone=%d", (int)audio::micOn(),
+                 (int)M5Cardputer.Speaker.isRunning(), (int)M5Cardputer.Speaker.isPlaying(), (int)drone);
+        c.drawString(dbg, 4, 71);
+#endif
         return true;
     }
 
@@ -261,9 +277,15 @@ private:
         }
         if (M5Cardputer.Mic.record(micBuf, kFrame, (uint32_t)kMicRate)) {
             pending_ = true;
-        } else if (now - lastLogMs_ > 1000) {
-            lastLogMs_ = now;
-            Serial.println("[tuner] Mic.record() refused the request");
+        } else {
+#ifdef TUNER_DEBUG
+            ++dbgRecFails_;
+            dirty_ = true;
+#endif
+            if (now - lastLogMs_ > 1000) {
+                lastLogMs_ = now;
+                Serial.println("[tuner] Mic.record() refused the request");
+            }
         }
     }
 
@@ -272,6 +294,16 @@ private:
         const float target = noteFreq(s.targetNote, s.refA);
         const pitch::Result r = pitch::detect(micBuf, kFrame, kMicRate, target, kSearchSpan, workBuf);
 
+#ifdef TUNER_DEBUG
+        ++dbgFrames_;
+        dbgRms_ = r.rms;
+        dbgValid_ = r.valid;
+        dbgFreq_ = r.freq;
+        dbgClarity_ = r.clarity;
+        dbgPeak_ = 0;
+        for (size_t i = 0; i < kFrame; ++i) dbgPeak_ = max(dbgPeak_, abs((int)micBuf[i]));
+        dirty_ = true;
+#endif
         const bool good = r.valid && r.rms >= kMinRms && r.clarity >= kMinClarity;
         float cents = 0;
         bool accepted = false;
@@ -316,6 +348,12 @@ private:
     uint32_t lastDrawMs_ = 0;
     uint32_t lastLogMs_ = 0;
     bool dirty_ = true;
+#ifdef TUNER_DEBUG
+    uint32_t dbgFrames_ = 0, dbgRecFails_ = 0;
+    float dbgRms_ = 0, dbgFreq_ = 0, dbgClarity_ = 0;
+    int dbgPeak_ = 0;
+    bool dbgValid_ = false;
+#endif
 };
 
 }  // namespace
