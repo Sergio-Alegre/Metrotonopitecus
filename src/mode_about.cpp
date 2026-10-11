@@ -1,7 +1,31 @@
-// Placeholder for the fourth (extra) mode, key A. Shows the key reference.
+// Placeholder for the fourth (extra) mode, key A. Shows credits and the key reference.
 #include "modes.h"
 
 namespace {
+
+enum class Arrow { Up, Down, Left, Right };
+
+// Small cursor-key arrow (about 9x9 px) centred on (cx, cy).
+void drawArrow(M5Canvas& c, int cx, int cy, Arrow a, uint16_t col) {
+    switch (a) {
+        case Arrow::Up:
+            c.fillTriangle(cx, cy - 5, cx - 4, cy, cx + 4, cy, col);
+            c.fillRect(cx - 1, cy, 3, 5, col);
+            break;
+        case Arrow::Down:
+            c.fillTriangle(cx, cy + 5, cx - 4, cy, cx + 4, cy, col);
+            c.fillRect(cx - 1, cy - 5, 3, 5, col);
+            break;
+        case Arrow::Left:
+            c.fillTriangle(cx - 5, cy, cx, cy - 4, cx, cy + 4, col);
+            c.fillRect(cx, cy - 1, 5, 3, col);
+            break;
+        case Arrow::Right:
+            c.fillTriangle(cx + 5, cy, cx, cy - 4, cx, cy + 4, col);
+            c.fillRect(cx - 5, cy - 1, 5, 3, col);
+            break;
+    }
+}
 
 class AboutMode : public Mode {
 public:
@@ -19,17 +43,28 @@ public:
 
         c.setFont(&fonts::Font0);
         c.setTextColor(WHITE);
-        c.drawString("Metronome + tuner for Cardputer ADV", 4, 28);
-        c.setTextColor(DARKGREY);
-        c.drawString("Build " __DATE__ " " __TIME__, 4, 40);
+        c.drawString("Developed by Sergio Alegre", 4, 28);
+        c.setTextColor(LIGHTGREY);
+        c.drawString("www.sergioalegre.com", 4, 39);
 
+        // Key reference: keys on the left, meaning at x = 62
+        constexpr int kDesc = 62;
         c.setTextColor(YELLOW);
         c.drawString("Keys", 4, 58);
+
         c.setTextColor(WHITE);
-        c.drawString("; , . /    arrows (no Fn needed)", 4, 70);
-        c.drawString("- _  = +    volume down / up", 4, 80);
-        c.drawString("M T G A    switch mode", 4, 90);
-        c.drawString("Space      start / stop, drone", 4, 100);
+        const Arrow arrows[] = {Arrow::Up, Arrow::Down, Arrow::Left, Arrow::Right};
+        for (int i = 0; i < 4; ++i) drawArrow(c, 9 + 13 * i, 74, arrows[i], WHITE);
+        c.drawString("(no Fn needed)", kDesc, 70);
+
+        c.drawString("-   +", 4, 83);
+        c.drawString("volume down / up", kDesc, 83);
+
+        c.drawString("M T G A", 4, 96);
+        c.drawString("switch mode", kDesc, 96);
+
+        c.drawString("Space", 4, 109);
+        c.drawString("start / stop", kDesc, 109);
         return true;
     }
 };

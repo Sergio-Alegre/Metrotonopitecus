@@ -25,7 +25,34 @@ std::atomic<int> gSub{1};
 std::atomic<uint32_t> gSeq{0};  // clicks fired since boot
 std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
 
-const char* kSubNames[] = {"", "Quarters", "Eighths", "Triplets", "Sixteenths"};
+// Draws the note figure for a subdivision (1 = quarter, 2 = two beamed
+// eighths, 3 = beamed triplet with a "3", 4 = four beamed sixteenths).
+// cx: horizontal centre, base: y of the note heads' centre.
+void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
+    constexpr int kStem = 14;
+    constexpr int kSpacing[] = {0, 0, 14, 14, 9};
+    const int n = sub;  // number of notes equals the subdivision
+    const int span = kSpacing[sub] * (n - 1);
+    const int x0 = cx - span / 2;
+
+    for (int i = 0; i < n; ++i) {
+        const int hx = x0 + i * kSpacing[sub];
+        c.fillEllipse(hx, base, 4, 3, col);
+        c.fillRect(hx + 3, base - kStem, 2, kStem, col);  // stem on the right of the head
+    }
+    if (n > 1) {
+        const int left = x0 + 3;
+        const int width = span + 2;
+        c.fillRect(left, base - kStem, width, 3, col);  // main beam
+        if (sub == 4) c.fillRect(left, base - kStem + 5, width, 3, col);  // second beam
+    }
+    if (sub == 3) {
+        c.setFont(&fonts::Font0);
+        c.setTextDatum(bottom_center);
+        c.setTextColor(col);
+        c.drawString("3", cx + 1, base - kStem - 3);
+    }
+}
 
 void fireClick(int idx, int sub) {
     if (idx == 0) {
@@ -159,20 +186,20 @@ public:
         c.setTextDatum(top_left);
         c.setTextColor(DARKGREY);
         c.drawString("Metronome", 4, 3);
-        c.setTextDatum(top_right);
-        c.setTextColor(running ? GREEN : RED);
-        c.drawString(running ? "RUNNING" : "STOPPED", 236, 3);
 
-        // Tempo
+        // Tempo: number centred, "BPM" as a subscript at its bottom right
         const bool typing = entry_.length() > 0;
+        const String tempo = typing ? entry_ : String(s.bpm);
         c.setFont(&fonts::Font7);
         c.setTextDatum(middle_center);
         c.setTextColor(typing ? YELLOW : WHITE);
-        c.drawString(typing ? entry_ : String(s.bpm), 120, 38);
+        c.drawString(tempo, 120, 38);
+        const int numberW = c.textWidth(tempo);
 
-        c.setFont(&fonts::Font0);
+        c.setFont(&fonts::Font2);
+        c.setTextDatum(bottom_left);
         c.setTextColor(typing ? YELLOW : LIGHTGREY);
-        c.drawString(typing ? "BPM - Enter to set" : "BPM", 120, 70);
+        c.drawString("BPM", 120 + numberW / 2 + 4, 62);
 
         // Beats of the bar
         const int sub = s.subdivision;
@@ -188,11 +215,13 @@ public:
             }
         }
 
-        // Subdivision
+        // Subdivision: note figure between < >
         c.setFont(&fonts::Font2);
         c.setTextDatum(middle_center);
         c.setTextColor(CYAN);
-        c.drawString(String("<  ") + kSubNames[sub] + "  >", 120, 112);
+        c.drawString("<", 70, 112);
+        c.drawString(">", 170, 112);
+        drawSubdivision(c, sub, 120, 119, CYAN);
         return true;
     }
 
