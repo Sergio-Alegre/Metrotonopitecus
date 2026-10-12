@@ -56,6 +56,7 @@ bool micCodecCallback(void*, bool enabled) {
 // stage up or down (every mic <-> speaker switch). Muting the DAC around the
 // switch and un-muting it with the codec's own volume ramp hides the pop.
 constexpr uint8_t kCodecAddr = 0x18;
+constexpr uint8_t kRegDacVolume = 0x32;  // 0xBF = 0 dB
 constexpr uint8_t kRegDacMute = 0x31;  // bits 6 and 5 mute the DAC
 constexpr uint8_t kRegDacRamp = 0x37;  // bits 7..4: volume ramp rate (0 = no ramp)
 constexpr uint32_t kI2cFreq = 100000;
@@ -104,10 +105,7 @@ void begin() {
 
     auto setMicCallback = &MicAccess::setCallback;
     (M5Cardputer.Mic.*setMicCallback)(nullptr, micCodecCallback);
-    codecMute(true);
-    M5Cardputer.Speaker.begin();  // power the output stage once, at launch
-    unmutePending = true;
-    unmuteAt = millis() + kUnmuteDelayMs;
+    // The speaker is started lazily by the first sound: starting it here pops at launch.
 }
 
 void setVolumeLevel(int level) { M5Cardputer.Speaker.setVolume(levelToVolume(level)); }
@@ -127,7 +125,21 @@ void droneStart(float hz) {
 }
 
 void droneStop() {
-    if (droneActive) M5Cardputer.Speaker.stop(kDroneChannel);
+    if (droneActive) {
+        // Cutting a sine mid-wave clicks: fade the codec's DAC volume out first
+        // (0xBF = 0 dB, about 0.5 dB per step), then stop and restore the volume.
+        auto& i2c = M5.In_I2C;
+        for (int v = 0xBF; v >= 0x40; v -= 12) {
+            i2c.writeRegister8(kCodecAddr, kRegDacVolume, (uint8_t)v, kI2cFreq);
+            delay(3);
+        }
+        codecMute(true);
+        M5Cardputer.Speaker.stop(kDroneChannel);
+        delay(5);
+        i2c.writeRegister8(kCodecAddr, kRegDacVolume, 0xBF, kI2cFreq);
+        unmutePending = true;
+        unmuteAt = millis() + kUnmuteDelayMs;
+    }
     droneActive = false;
 }
 
