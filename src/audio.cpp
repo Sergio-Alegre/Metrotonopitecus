@@ -20,6 +20,37 @@ uint8_t sineTable[kSineLen];
 bool droneActive = false;
 bool micActive = false;
 
+// M5Unified's own ADV microphone callback powers the whole codec down when the
+// mic stops and the speaker callback powers it up again, which pops. Replace
+// the mic callback with one that does the same register writes on enable but
+// leaves the output stage powered on disable. (setCallback is protected, so it
+// is reached through a pointer to member named via a derived class.)
+struct MicAccess : m5::Mic_Class {
+    using m5::Mic_Class::setCallback;
+};
+
+uint32_t micCbOn = 0, micCbOff = 0;
+
+bool micCodecCallback(void*, bool enabled) {
+    if (!enabled) {
+        ++micCbOff;
+        return true;
+    }
+    ++micCbOn;
+    static constexpr uint8_t kEnable[][2] = {
+        {0x00, 0x80},  // CSM power on
+        {0x01, 0xBA},  // clocks: MCLK from BCLK, ADC clock on, DAC clock off
+        {0x02, 0x18},  // MULT_PRE = 3
+        {0x0D, 0x01},  // power up analog circuitry
+        {0x0E, 0x02},  // enable PGA and ADC modulator
+        {0x14, 0x10},  // select Mic1p-Mic1n, minimum PGA gain
+        {0x17, 0xBF},  // ADC volume 0 dB
+        {0x1C, 0x6A},  // ADC equalizer bypass, cancel DC offset
+    };
+    for (const auto& r : kEnable) M5.In_I2C.writeRegister8(0x18, r[0], r[1], 100000);
+    return true;
+}
+
 // The ES8311 codec of the ADV makes a pop whenever M5Unified powers its output
 // stage up or down (every mic <-> speaker switch). Muting the DAC around the
 // switch and un-muting it with the codec's own volume ramp hides the pop.
@@ -69,6 +100,10 @@ void begin() {
         sineTable[i] = (uint8_t)lroundf(128.0f + 127.0f * sinf(2.0f * (float)M_PI * i / kSineLen));
     }
     setVolumeLevel(settings::get().volume);
+
+    auto setMicCallback = &MicAccess::setCallback;
+    (M5Cardputer.Mic.*setMicCallback)(nullptr, micCodecCallback);
+    M5Cardputer.Speaker.begin();  // power the output stage once, at launch
 }
 
 void setVolumeLevel(int level) { M5Cardputer.Speaker.setVolume(levelToVolume(level)); }
@@ -168,7 +203,8 @@ const char* debugCodec() {
     auto& i2c = M5.In_I2C;
     const uint8_t r31 = i2c.readRegister8(kCodecAddr, kRegDacMute, kI2cFreq);
     const uint8_t r37 = i2c.readRegister8(kCodecAddr, kRegDacRamp, kI2cFreq);
-    snprintf(buf, sizeof(buf), "codec r31=%02X r37=%02X pend=%d", r31, r37, (int)unmutePending);
+    snprintf(buf, sizeof(buf), "r31=%02X r37=%02X p=%d cb=%u/%u", r31, r37, (int)unmutePending, (unsigned)micCbOn,
+             (unsigned)micCbOff);
     return buf;
 }
 #endif
