@@ -145,6 +145,12 @@ public:
     void update() override {
         const uint32_t now = millis();
         pollMic(now);
+#ifdef TUNER_DEBUG
+        if (now - dbgRefreshMs_ > 250) {  // keep the codec register readout live
+            dbgRefreshMs_ = now;
+            dirty_ = true;
+        }
+#endif
 
         // Needle: exponential approach (time constant ~70 ms).
         const float dt = (now - lastUpdateMs_) / 1000.0f;
@@ -245,8 +251,10 @@ public:
         c.drawString(dbg, 4, 71);
         c.setTextColor(YELLOW);
         c.drawString(audio::debugStatus(), 4, 80);
+        c.setTextColor(YELLOW);
+        c.drawString(audio::debugCodec(), 4, 89);
         c.setTextColor(DARKGREY);
-        c.drawString("B beep  Q square  S sine", 4, 89);
+        c.drawString("B beep  Q square  S sine", 4, 98);
 #endif
         return true;
     }
@@ -360,7 +368,7 @@ private:
     uint32_t lastLogMs_ = 0;
     bool dirty_ = true;
 #ifdef TUNER_DEBUG
-    uint32_t dbgFrames_ = 0, dbgRecFails_ = 0;
+    uint32_t dbgFrames_ = 0, dbgRecFails_ = 0, dbgRefreshMs_ = 0;
     float dbgRms_ = 0, dbgFreq_ = 0, dbgClarity_ = 0;
     int dbgPeak_ = 0;
     bool dbgValid_ = false;

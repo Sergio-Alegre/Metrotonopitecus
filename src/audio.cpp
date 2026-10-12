@@ -162,6 +162,15 @@ void debugTone(char kind, float hz) {
 }
 
 const char* debugStatus() { return dbgStatus; }
+
+const char* debugCodec() {
+    static char buf[48];
+    auto& i2c = M5.In_I2C;
+    const uint8_t r31 = i2c.readRegister8(kCodecAddr, kRegDacMute, kI2cFreq);
+    const uint8_t r37 = i2c.readRegister8(kCodecAddr, kRegDacRamp, kI2cFreq);
+    snprintf(buf, sizeof(buf), "codec r31=%02X r37=%02X pend=%d", r31, r37, (int)unmutePending);
+    return buf;
+}
 #endif
 
 }  // namespace audio

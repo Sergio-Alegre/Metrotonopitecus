@@ -33,6 +33,8 @@ void update();
 void debugTone(char kind, float hz);
 // Result of the last speaker operation, for the on-screen overlay.
 const char* debugStatus();
+// Live read of the codec mute/ramp registers (0x31, 0x37) and the pending un-mute flag.
+const char* debugCodec();
 #endif
 
 // Microphone: stops the speaker and starts capture. Returns false on failure.
