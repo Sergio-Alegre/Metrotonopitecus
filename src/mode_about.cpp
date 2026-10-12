@@ -1,6 +1,10 @@
 // Placeholder for the fourth (extra) mode, key A. Shows credits and the key reference.
 #include "modes.h"
 
+#ifdef TUNER_DEBUG
+#include "audio.h"
+#endif
+
 namespace {
 
 enum class Arrow { Up, Down, Left, Right };
@@ -31,6 +35,41 @@ class AboutMode : public Mode {
 public:
     char hotkey() const override { return 'a'; }
     const char* label() const override { return "About"; }
+
+#ifdef TUNER_DEBUG
+    // Debug build: this screen runs the pop-hunting sequence instead of showing credits.
+    void onKey(const KeyEvent& e) override {
+        if (e.key == Key::Space) {
+            ++step_;
+            desc_ = audio::debugStep(step_);
+            Serial.printf("[popTest] %s\n", desc_);
+            dirty_ = true;
+        }
+    }
+
+    bool draw(M5Canvas& c, bool force) override {
+        if (!force && !dirty_) return false;
+        dirty_ = false;
+        c.fillSprite(BLACK);
+        c.setFont(&fonts::Font0);
+        c.setTextDatum(top_left);
+        c.setTextColor(ORANGE);
+        c.drawString("POP TEST (debug build)", 4, 4);
+        c.setTextColor(WHITE);
+        c.drawString("Fresh launch, no sound used yet.", 4, 20);
+        c.drawString("Press Space once per step and", 4, 30);
+        c.drawString("note the step where a pop is heard.", 4, 40);
+        c.setTextColor(YELLOW);
+        c.drawString(step_ == 0 ? "Next: step 1 of 11" : desc_, 4, 62);
+        return true;
+    }
+
+private:
+    int step_ = 0;
+    const char* desc_ = "";
+    bool dirty_ = true;
+};
+#else
 
     bool draw(M5Canvas& c, bool force) override {
         if (!force) return false;
@@ -68,6 +107,7 @@ public:
         return true;
     }
 };
+#endif
 
 }  // namespace
 

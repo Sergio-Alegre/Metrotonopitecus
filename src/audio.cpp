@@ -214,6 +214,41 @@ void debugTone(char kind, float hz) {
 
 const char* debugStatus() { return dbgStatus; }
 
+const char* debugStep(int step) {
+    struct RegStep {
+        uint8_t reg, val;
+        const char* name;
+    };
+    static const RegStep kRegs[] = {
+        {0x00, 0x80, "3: reg 0x00 = 0x80 (CSM power on)"},
+        {0x01, 0xBF, "4: reg 0x01 = 0xBF (clocks on)"},
+        {0x02, 0x18, "5: reg 0x02 = 0x18 (MULT_PRE)"},
+        {0x0D, 0x01, "6: reg 0x0D = 0x01 (analog power up)"},
+        {0x0E, 0x02, "7: reg 0x0E = 0x02 (PGA + ADC)"},
+        {0x14, 0x10, "8: reg 0x14 = 0x10 (mic select)"},
+        {0x17, 0xBF, "9: reg 0x17 = 0xBF (ADC volume)"},
+        {0x1C, 0x6A, "10: reg 0x1C = 0x6A (ADC eq)"},
+    };
+    if (step == 1) {
+        codecMute(true);
+        return "1: DAC mute (reg 0x31)";
+    }
+    if (step == 2) {
+        M5Cardputer.Speaker.end();
+        return "2: Speaker.end()";
+    }
+    if (step >= 3 && step <= 10) {
+        const RegStep& r = kRegs[step - 3];
+        M5.In_I2C.writeRegister8(kCodecAddr, r.reg, r.val, kI2cFreq);
+        return r.name;
+    }
+    if (step == 11) {
+        micActive = M5Cardputer.Mic.begin();
+        return "11: Mic.begin() (I2S clocks start)";
+    }
+    return "end of sequence";
+}
+
 const char* debugCodec() {
     static char buf[48];
     auto& i2c = M5.In_I2C;
