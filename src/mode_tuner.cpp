@@ -128,6 +128,13 @@ public:
                 break;
             case Key::Char:
                 if (e.ch == 'p') toggleDrone();
+#ifdef TUNER_DEBUG
+                if (e.ch == 'b' || e.ch == 'q' || e.ch == 's') {
+                    pending_ = false;
+                    hasReading_ = false;
+                    audio::debugTone(e.ch, noteFreq(s.targetNote, s.refA));
+                }
+#endif
                 break;
             default:
                 break;
@@ -236,6 +243,10 @@ public:
         snprintf(dbg, sizeof(dbg), "mic=%d spk=%d play=%d drone=%d", (int)audio::micOn(),
                  (int)M5Cardputer.Speaker.isRunning(), (int)M5Cardputer.Speaker.isPlaying(), (int)drone);
         c.drawString(dbg, 4, 71);
+        c.setTextColor(YELLOW);
+        c.drawString(audio::debugStatus(), 4, 80);
+        c.setTextColor(DARKGREY);
+        c.drawString("B beep  Q square  S sine", 4, 89);
 #endif
         return true;
     }

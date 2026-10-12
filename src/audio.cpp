@@ -20,6 +20,14 @@ uint8_t sineTable[kSineLen];
 bool droneActive = false;
 bool micActive = false;
 
+#ifdef TUNER_DEBUG
+char dbgStatus[48] = "-";
+int16_t dbgSine16[64];
+#define DBG_STATUS(...) snprintf(dbgStatus, sizeof(dbgStatus), __VA_ARGS__)
+#else
+#define DBG_STATUS(...) ((void)0)
+#endif
+
 // Perceptual-ish curve: level 0 is silent, level max is full scale.
 uint8_t levelToVolume(int level) {
     if (level <= 0) return 0;
@@ -48,6 +56,8 @@ void click(float hz, uint32_t ms) {
 void droneStart(float hz) {
     if (micActive) return;
     droneActive = M5Cardputer.Speaker.tone(hz, UINT32_MAX, kDroneChannel, true, sineTable, kSineLen);
+    DBG_STATUS("drone %.0fHz tone=%d run=%d vol=%d", hz, (int)droneActive, (int)M5Cardputer.Speaker.isRunning(),
+               (int)M5Cardputer.Speaker.getVolume());
     Serial.printf("[audio] drone %.2f Hz: %s (speaker running=%d, volume=%d)\n", hz, droneActive ? "queued" : "FAILED",
                   (int)M5Cardputer.Speaker.isRunning(), (int)M5Cardputer.Speaker.getVolume());
 }
@@ -84,9 +94,36 @@ void micStop() {
     micActive = false;
     delay(30);  // let the codec settle before the speaker path is brought back up
     const bool ok = M5Cardputer.Speaker.begin();
+    DBG_STATUS("spk begin=%d en=%d", (int)ok, (int)M5Cardputer.Speaker.isEnabled());
     Serial.printf("[audio] mic stopped, speaker begin: %s\n", ok ? "ok" : "FAILED");
 }
 
 bool micOn() { return micActive; }
+
+#ifdef TUNER_DEBUG
+void debugTone(char kind, float hz) {
+    if (micActive) micStop();
+    bool ok = false;
+    switch (kind) {
+        case 'b':
+            ok = M5Cardputer.Speaker.tone(hz, 500, kDroneChannel, true);
+            break;
+        case 'q':
+            ok = M5Cardputer.Speaker.tone(hz, UINT32_MAX, kDroneChannel, true);
+            droneActive = ok;
+            break;
+        case 's':
+            for (int i = 0; i < 64; ++i) dbgSine16[i] = (int16_t)lroundf(20000.0f * sinf(2.0f * (float)M_PI * i / 64.0f));
+            ok = M5Cardputer.Speaker.playRaw(dbgSine16, 64, (uint32_t)(hz * 64.0f + 0.5f), false, UINT32_MAX, kDroneChannel,
+                                             true);
+            droneActive = ok;
+            break;
+    }
+    DBG_STATUS("%c %.0fHz ok=%d run=%d play=%d", kind, hz, (int)ok, (int)M5Cardputer.Speaker.isRunning(),
+               (int)M5Cardputer.Speaker.isPlaying());
+}
+
+const char* debugStatus() { return dbgStatus; }
+#endif
 
 }  // namespace audio

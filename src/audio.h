@@ -23,6 +23,15 @@ bool droneOn();
 
 void stopAll();
 
+#ifdef TUNER_DEBUG
+// Sound experiments for the debug build (kind: 'b' 0.5 s beep, 'q' endless
+// square tone, 's' endless sine through playRaw). They switch the speaker on
+// first, like the drone does.
+void debugTone(char kind, float hz);
+// Result of the last speaker operation, for the on-screen overlay.
+const char* debugStatus();
+#endif
+
 // Microphone: stops the speaker and starts capture. Returns false on failure.
 bool micStart();
 void micStop();
