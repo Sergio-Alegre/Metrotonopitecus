@@ -39,7 +39,8 @@ bool micCodecCallback(void*, bool enabled) {
     ++micCbOn;
     static constexpr uint8_t kEnable[][2] = {
         {0x00, 0x80},  // CSM power on
-        {0x01, 0xBA},  // clocks: MCLK from BCLK, ADC clock on, DAC clock off
+        {0x01, 0xBF},  // clocks: MCLK from BCLK, ADC and DAC clocks on (0xBA would gate the
+                       // DAC clock, and switching it back on for the speaker pops)
         {0x02, 0x18},  // MULT_PRE = 3
         {0x0D, 0x01},  // power up analog circuitry
         {0x0E, 0x02},  // enable PGA and ADC modulator
@@ -103,7 +104,10 @@ void begin() {
 
     auto setMicCallback = &MicAccess::setCallback;
     (M5Cardputer.Mic.*setMicCallback)(nullptr, micCodecCallback);
+    codecMute(true);
     M5Cardputer.Speaker.begin();  // power the output stage once, at launch
+    unmutePending = true;
+    unmuteAt = millis() + kUnmuteDelayMs;
 }
 
 void setVolumeLevel(int level) { M5Cardputer.Speaker.setVolume(levelToVolume(level)); }
