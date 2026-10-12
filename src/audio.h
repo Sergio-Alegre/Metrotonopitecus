@@ -23,6 +23,9 @@ bool droneOn();
 
 void stopAll();
 
+// Call from the main loop (finishes the delayed un-mute after a mic -> speaker switch).
+void update();
+
 #ifdef TUNER_DEBUG
 // Sound experiments for the debug build (kind: 'b' 0.5 s beep, 'q' endless
 // square tone, 's' endless sine through playRaw). They switch the speaker on

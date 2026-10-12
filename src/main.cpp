@@ -114,6 +114,7 @@ void loop() {
     while (input::next(e)) handleKey(e);
 
     settings::tick();
+    audio::update();
     current->update();
     if (current->draw(canvas, forceRedraw)) canvas.pushSprite(0, 0);
     forceRedraw = false;

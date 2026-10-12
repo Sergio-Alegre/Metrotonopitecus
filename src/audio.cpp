@@ -20,6 +20,31 @@ uint8_t sineTable[kSineLen];
 bool droneActive = false;
 bool micActive = false;
 
+// The ES8311 codec of the ADV makes a pop whenever M5Unified powers its output
+// stage up or down (every mic <-> speaker switch). Muting the DAC around the
+// switch and un-muting it with the codec's own volume ramp hides the pop.
+constexpr uint8_t kCodecAddr = 0x18;
+constexpr uint8_t kRegDacMute = 0x31;  // bits 6 and 5 mute the DAC
+constexpr uint8_t kRegDacRamp = 0x37;  // bits 7..4: volume ramp rate (0 = no ramp)
+constexpr uint32_t kI2cFreq = 100000;
+constexpr uint32_t kUnmuteDelayMs = 250;
+bool unmutePending = false;
+uint32_t unmuteAt = 0;
+uint8_t lastMuteReg = 0;
+
+void codecMute(bool mute) {
+    auto& i2c = M5.In_I2C;
+    uint8_t v = i2c.readRegister8(kCodecAddr, kRegDacMute, kI2cFreq);
+    if (mute) {
+        v |= 0x60;
+    } else {
+        i2c.writeRegister8(kCodecAddr, kRegDacRamp, 0x48, kI2cFreq);  // soft ramp, ~0.25 dB per 64 samples
+        v &= 0x9F;
+    }
+    i2c.writeRegister8(kCodecAddr, kRegDacMute, v, kI2cFreq);
+    lastMuteReg = i2c.readRegister8(kCodecAddr, kRegDacMute, kI2cFreq);
+}
+
 #ifdef TUNER_DEBUG
 char dbgStatus[48] = "-";
 int16_t dbgSine16[64];
@@ -74,8 +99,18 @@ void stopAll() {
     M5Cardputer.Speaker.stop();
 }
 
+void update() {
+    if (unmutePending && (int32_t)(millis() - unmuteAt) >= 0) {
+        unmutePending = false;
+        codecMute(false);
+        DBG_STATUS("unmute reg31=%02X", lastMuteReg);
+    }
+}
+
 bool micStart() {
     if (micActive) return true;
+    unmutePending = false;
+    codecMute(true);
     stopAll();
     M5Cardputer.Speaker.end();
     micActive = M5Cardputer.Mic.begin();
@@ -90,11 +125,14 @@ void micStop() {
     if (!micActive) return;
     // As in the official M5 example: let the capture in flight finish first.
     for (int i = 0; i < 300 && M5Cardputer.Mic.isRecording(); ++i) delay(1);
+    codecMute(true);
     M5Cardputer.Mic.end();
     micActive = false;
     delay(30);  // let the codec settle before the speaker path is brought back up
     const bool ok = M5Cardputer.Speaker.begin();
-    DBG_STATUS("spk begin=%d en=%d", (int)ok, (int)M5Cardputer.Speaker.isEnabled());
+    unmutePending = true;
+    unmuteAt = millis() + kUnmuteDelayMs;
+    DBG_STATUS("spk begin=%d en=%d mute=%02X", (int)ok, (int)M5Cardputer.Speaker.isEnabled(), lastMuteReg);
     Serial.printf("[audio] mic stopped, speaker begin: %s\n", ok ? "ok" : "FAILED");
 }
 
