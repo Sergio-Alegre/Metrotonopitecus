@@ -53,8 +53,10 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
   hasta 150 BPM, 40 ms a 300 BPM). Al parar, por serie sale el retardo medio clic→LED.
   Hardware: el LED va en el GPIO21 y se maneja con `neopixelWrite` (`M5.Led` no hace nada con este núcleo
   Arduino). Su alimentación es el GPIO38, el mismo pin que la retroiluminación de la pantalla (PWM), así
-  que solo funciona con la pantalla a brillo alto: medido, funciona a 192 y falla a 160 (de 255). El modo
-  metrónomo sube el brillo a 224 mientras está activo y lo restaura al salir. El entorno
+  que solo funciona con la pantalla a brillo alto: medido, funciona a 192 y falla a 160 (de 255). Por debajo
+  de 255 el pin se corta una parte de cada periodo PWM y un comando enviado entonces se pierde (destellos que
+  no terminan). El modo metrónomo pone el brillo a 255 mientras está activo y lo restaura al salir, y además
+  repite cada comando del LED dos veces (a los 6 y 12 ms). El entorno
   `cardputer-adv-led-debug` añade una línea de diagnóstico y las teclas L/K para probar el LED.
 
 ### Afinador

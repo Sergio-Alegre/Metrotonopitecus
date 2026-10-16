@@ -23,10 +23,14 @@ constexpr int kBeatSpacing = 26;  // distance between beat centres; 6 beats end 
 constexpr int kMargin = 6;        // left margin of the tempo number and of the beats
 constexpr int kFlashMinMs = 30;   // LED flash length limits (see afterPush())
 constexpr int kFlashMaxMs = 80;
-// GPIO38 is both the screen backlight (PWM) and the LED's power switch, so the LED only works
-// while the backlight is bright enough (measured on this device: works at 192, not at 160).
-// The metronome raises the screen to this level while it is active, with some margin.
-constexpr uint8_t kLedMinBrightness = 224;
+// GPIO38 is both the screen backlight (PWM) and the LED's power switch. Measured on this
+// device: the LED stays on at backlight 192 but not at 160, and below 255 the pin is off for
+// part of every PWM period, so a data frame sent then is lost (a flash that does not end).
+// The metronome sets the screen to full brightness while it is active, which keeps the pin
+// high, and every LED command is also repeated twice (kLedResends, every kLedResendMs).
+constexpr uint8_t kLedMinBrightness = 255;
+constexpr int kLedResends = 2;
+constexpr uint32_t kLedResendMs = 6;
 // Bottom row: beats from the left, "B: beats" hint at the right. The circles' bottom
 // (centre + 8 = row 120) leaves 4 free rows above the 125 px content area's end, and the
 // hint's text sits on that same bottom line.
@@ -225,7 +229,7 @@ public:
                         M5Cardputer.Display.setBrightness(testLevel_);
                         restoreBrightness_ = true;
                     }
-                    ledSet(255, 255, 255);
+                    showLed(255, 255, 255);
                     ledOn_ = true;
                     ledOffAt_ = millis() + 2000;
                 }
@@ -286,6 +290,11 @@ public:
                 flashAccent_ = (idx == 0);
             }
         }
+        if (ledResends_ > 0 && (int32_t)(millis() - ledResendAt_) >= 0) {
+            ledSet(ledR_, ledG_, ledB_);
+            --ledResends_;
+            ledResendAt_ += kLedResendMs;
+        }
         if (ledOn_ && (int32_t)(millis() - ledOffAt_) >= 0) ledOff();
     }
 
@@ -300,9 +309,9 @@ public:
         const int beatMs = 60000 / gBpm.load();
         const int flashMs = constrain(beatMs / 5, kFlashMinMs, kFlashMaxMs);
         if (flashAccent_) {
-            ledSet(255, 0, 0);
+            showLed(255, 0, 0);
         } else {
-            ledSet(0, 255, 0);
+            showLed(0, 255, 0);
         }
         ledOn_ = true;
         ledOffAt_ = millis() + flashMs;
@@ -389,9 +398,19 @@ public:
     }
 
 private:
+    // Sets the LED now and schedules the repeats that make up for a frame lost to the backlight PWM.
+    void showLed(uint8_t r, uint8_t g, uint8_t b) {
+        ledR_ = r;
+        ledG_ = g;
+        ledB_ = b;
+        ledSet(r, g, b);
+        ledResends_ = kLedResends;
+        ledResendAt_ = millis() + kLedResendMs;
+    }
+
     void ledOff() {
         ledOn_ = false;
-        ledSet(0, 0, 0);
+        showLed(0, 0, 0);
 #ifdef LED_DEBUG
         if (restoreBrightness_) {
             M5Cardputer.Display.setBrightness(max(userBrightness_, kLedMinBrightness));
@@ -444,6 +463,9 @@ private:
     bool flashPending_ = false;
     bool flashAccent_ = false;
     bool ledOn_ = false;
+    uint8_t ledR_ = 0, ledG_ = 0, ledB_ = 0;  // last colour sent, for the repeats
+    int ledResends_ = 0;
+    uint32_t ledResendAt_ = 0;
     uint32_t ledOffAt_ = 0;
     uint64_t lagSumUs_ = 0;
     uint32_t lagMinUs_ = 0;
