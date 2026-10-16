@@ -23,6 +23,10 @@ constexpr int kBeatSpacing = 26;  // distance between beat centres; 6 beats end 
 constexpr int kMargin = 6;        // left margin of the tempo number and of the beats
 constexpr int kFlashMinMs = 30;   // LED flash length limits (see afterPush())
 constexpr int kFlashMaxMs = 80;
+// GPIO38 is both the screen backlight (PWM) and the LED's power switch, so the LED only works
+// while the backlight is bright enough (measured on this device: works at 192, not at 160).
+// The metronome raises the screen to this level while it is active, with some margin.
+constexpr uint8_t kLedMinBrightness = 224;
 // Bottom row: beats from the left, "B: beats" hint at the right. The circles' bottom
 // (centre + 8 = row 120) leaves 4 free rows above the 125 px content area's end, and the
 // hint's text sits on that same bottom line.
@@ -185,6 +189,8 @@ public:
         lastSeq_ = gSeq.load();
         dirty_ = true;
 
+        userBrightness_ = M5Cardputer.Display.getBrightness();
+        if (userBrightness_ < kLedMinBrightness) M5Cardputer.Display.setBrightness(kLedMinBrightness);
         ledOff();
     }
 
@@ -193,6 +199,7 @@ public:
         entry_ = "";
         flashPending_ = false;
         ledOff();
+        M5Cardputer.Display.setBrightness(userBrightness_);
     }
 
     void onKey(const KeyEvent& e) override {
@@ -214,7 +221,6 @@ public:
                     // restored afterwards. Press K repeatedly to walk down the levels.
                     if (e.ch == 'k') {
                         constexpr uint8_t kTestLevels[] = {255, 224, 192, 160, 128, 96};
-                        if (!restoreBrightness_) savedBrightness_ = M5Cardputer.Display.getBrightness();
                         testLevel_ = kTestLevels[testIdx_++ % sizeof(kTestLevels)];
                         M5Cardputer.Display.setBrightness(testLevel_);
                         restoreBrightness_ = true;
@@ -388,7 +394,7 @@ private:
         ledSet(0, 0, 0);
 #ifdef LED_DEBUG
         if (restoreBrightness_) {
-            M5Cardputer.Display.setBrightness(savedBrightness_);
+            M5Cardputer.Display.setBrightness(max(userBrightness_, kLedMinBrightness));
             restoreBrightness_ = false;
         }
 #endif
@@ -444,8 +450,8 @@ private:
     uint32_t lagMaxUs_ = 0;
     uint32_t lagCount_ = 0;
     uint32_t lastLagUs_ = 0;
+    uint8_t userBrightness_ = 128;  // screen brightness before the metronome raised it
 #ifdef LED_DEBUG
-    uint8_t savedBrightness_ = 0;
     uint8_t testLevel_ = 0;
     uint8_t testIdx_ = 0;
     bool restoreBrightness_ = false;
