@@ -22,16 +22,16 @@ constexpr int kBeatRadius = 8;
 constexpr int kBeatSpacing = 26;  // distance between beat centres; 6 beats end at x=152
 constexpr int kMargin = 6;        // left margin of the tempo number and of the beats
 // Bottom row: beats from the left, "B: beats" hint at the right. The circles' bottom
-// (centre + 8 = row 120) leaves 4 free rows above the 125 px content area's end; the hint
-// is centred 1 px lower than the circles.
+// (centre + 8 = row 120) leaves 4 free rows above the 125 px content area's end, and the
+// hint's text sits on that same bottom line.
 constexpr int kBottomY = 112;
-constexpr int kHintY = kBottomY + 1;
-// The tempo block (number, "BPM", arrows) and the subdivision move together, anchored to
-// the vertical centre of the tempo number.
-constexpr int kRowY = 52;
-constexpr int kBpmBottomY = kRowY + 24;  // bottom of the "BPM" text box; its caps end 4 rows above
+constexpr int kHintBottomY = kBottomY + kBeatRadius + 1;  // bottom of the hint's text box
+// The tempo block (number, arrows) and the subdivision move together, anchored to the
+// vertical centre of the tempo number.
+constexpr int kRowY = 62;
+constexpr int kArrowsTopY = kRowY + 8;  // top of the Up/Down arrows next to the number
 // Vertical centre of the note heads: their bottom (centre + 3) sits on the same line as
-// the bottom of "BPM" (its caps end on kRowY + 20) and of the tempo number.
+// the bottom of the tempo number.
 constexpr int kSubBaseY = kRowY + 17;
 constexpr int kSubCx = 196;       // horizontal centre of the subdivision figure
 // Four sixteenths span x-20..x+21 around the centre; the arrow glyphs are ~10 px wide
@@ -248,7 +248,7 @@ public:
         c.setTextSize(1);
 
         // Tempo on the left: the number is centred in a slot as wide as three digits
-        // (so 3-digit values touch the left margin), "BPM" as a subscript at its bottom right.
+        // (so 3-digit values touch the left margin), with the Up/Down arrows on its right.
         const bool typing = entry_.length() > 0;
         const String tempo = typing ? entry_ : String(s.bpm);
         c.setFont(&fonts::Font7);
@@ -259,14 +259,8 @@ public:
         c.drawString(tempo, numCx, kRowY);
         const int numberW = c.textWidth(tempo);
 
-        // Up/Down arrows sit to the left of "BPM" (same cue as the tuner's reference A)
-        const uint16_t bpmCol = typing ? YELLOW : LIGHTGREY;
-        const int bpmX = numCx + numberW / 2 + 18;
-        c.setFont(&fonts::Font2);
-        c.setTextDatum(bottom_left);
-        c.setTextColor(bpmCol);
-        c.drawString("BPM", bpmX, kBpmBottomY);
-        ui::drawUpDown(c, bpmX - 9, kBpmBottomY - 16, bpmCol);
+        // Up/Down arrows (same cue as the tuner's reference A), same colour as the number
+        ui::drawUpDown(c, numCx + numberW / 2 + 9, kArrowsTopY, typing ? YELLOW : LIGHTGREY);
 
         // Beats of the bar
         const int sub = s.subdivision;
@@ -298,9 +292,9 @@ public:
 
         // Key hint for the beats-per-bar rotation
         c.setFont(&fonts::Font0);
-        c.setTextDatum(middle_right);
+        c.setTextDatum(bottom_right);
         c.setTextColor(LIGHTGREY);
-        c.drawString("B: beats", 236, kHintY);
+        c.drawString("B: beats", 236, kHintBottomY);
         return true;
     }
 
