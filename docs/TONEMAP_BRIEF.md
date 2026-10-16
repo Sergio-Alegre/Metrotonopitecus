@@ -253,6 +253,65 @@ Estado por celda (`createEmptyCellState`): `totalVoiceMs`, `segments[]`, `biasRG
   Línea de referencia negra en `targetPct = 0.5` → 50 %.
 - La celda activa se marca `visited`.
 
+### 3.6 Correcciones verificadas contra el código fuente (fase 1, 2026-10-16)
+
+Fase 1 comparó §3 con `tonemap.live/index.html` (bd19db1) y `pitchy@4.0.1`. Constantes, fórmulas de color, re-basado,
+desvanecido, aguja y algoritmo MPM coinciden. Lo que sigue **corrige o completa** lo anterior y manda sobre ello.
+Números de línea de `index.html` entre paréntesis.
+
+**Correcciones**
+
+- **Aguja (§3.3, último punto):** con `attackMs = 0` la EMA de la aguja solo actúa en **Relaxed** (12083-12135:
+  en Medium y Hard `relaxedSmoothingActive` se pone a false en cada frame y el siguiente se resiembra con los
+  cents crudos). **Decisión: se replica ToneMap tal cual**: Medium y Hard muestran los cents crudos del frame;
+  Relaxed usa EMA con τ = 350 ms. Se reinicia al cambiar de nota o en un frame inválido.
+- **Segmentos (§3.4, primer punto):** el **primer frame válido de cada nota** (tras silencio o cambio de nota) **no
+  produce segmento** (12130-12132, 10500). El segmento de un frame lleva `dtMs` = tiempo desde el tick anterior,
+  sin tope; si `dtMs ≤ 0` no hay segmento. El `avgErrRatio` del segmento es el `errRatio` crudo del frame.
+- **Zona muerta (§3.3, §2.8):** la regla `|errRatio| ≤ DEADZONE_RATIO` (cruda, por frame) es correcta, pero en
+  ToneMap solo resalta un texto de depuración. El texto verde de cents y el LED son diseño de Metrotonopitecus.
+- **Retención (§3.4):** ToneMap poda por tiempo de reloj (`max(History, Hold)·1000 + 5000` ms, tope 10 min) y a
+  2000 segmentos por nota (≈33 s de sonido a 60 seg/s). No hay que copiarlo (ver §4.4).
+
+**Omisiones**
+
+- **Puertas:** frame válido = `hasSignalEnergy && clarity > 0.8 && 14 < pitch < 8200`, con
+  `hasSignalEnergy = rms > 1e-7 || peakAbs > 4e-6`; las cotas de Hz se aplican al pitch **sin transponer**.
+  La puerta de ruido de ToneMap es RMS en escala ±1.0: `[0, 0.025, 0.05, 0.10, 0.25, 0.50]` (None/Min/Low/Med/High/Max,
+  defecto 0.025). Los valores int16 de §4.3 son la adaptación del Cardputer, a calibrar en la PARADA A.
+- **Un solo frame inválido termina la nota** (12157-12164): se cierra el segmento, se limpia la nota activa y se
+  quita la aguja. Sin histéresis. Esto reinicia la EMA y hace que el siguiente frame válido no genere segmento.
+- **Pitchy:** `findPitch` devuelve `[0, 0]` sin máximos clave. El bucle de máximos clave va de i = 1 a N−2;
+  `NSDF[0] = 1` nunca cuenta como cruce ascendente; el máximo se siembra con la muestra del cruce y solo se
+  registra en el siguiente cruce descendente (un lóbulo final sin cerrar se descarta); cruces con `≤ 0` y `> 0`.
+  La NSDF cubre τ = 0..N−1 sin límite superior (pitchy usa FFT en Float32: en la cola de τ grandes, donde `m'` es
+  pequeño, la suma directa puede diferir ligeramente; no es un fallo).
+- **`freqToNoteData`:** parte de `round(semitonos desde A4) + 69` y prueba ±2 candidatos (0..127) minimizando
+  `|(pos − cand)·100 − offset(cand)|`. En temperamento igual sin stretch equivale a `round()`, salvo en el empate
+  exacto .5 (ToneMap elige el inferior, `Math.round` el superior). Irrelevante en la práctica.
+  `getTargetOffsetCents = getLatticeOffsetCents + getA4OffsetCents`, con `getA4OffsetCents = 1200·log2(A4/440)`.
+  En un futuro con stretch, éste se indexa por la nota de concierto y el temperamento por la escrita.
+- **Color (`updateCellDisplayColor`):** se mezcla desde `--grid-bg` (negro en tema oscuro) con canales redondeados;
+  una celda se pinta solo si `displayIntensity > 0.001`. Si `baseIntensity ≤ 0` o la celda nunca se tiñó
+  (`lastStainAtMs = 0`), display = 0. En Relaxed el acercamiento `alpha = 1 − exp(−Δms/125)` usa el tiempo desde la
+  última actualización de esa celda y solo se aplica en el frame en que se tiñó.
+- **`getRecentWeightedErr`:** el segmento del borde de la ventana entra parcialmente (`take = min(durMs, restante)`);
+  devuelve 0 si la duración total es 0.
+- **`recomputeAllCellColorsAndRender`** (al cambiar History, sensibilidad, La o transposición) pone
+  `lastStainAtMs = ahora` y `fadeAnchorIntensity = null` en **todas** las celdas: el temporizador de hold/desvanecido
+  se reinicia. En Relaxed no tira de la intensidad hacia la base (solo Medium/Hard saltan). Cambiar solo el Color hold
+  re-renderiza sin reiniciar nada.
+- **Transposición:** orden de ToneMap = cerrar segmento, desplazar el estado por `old − new`, limpiar la nota activa,
+  quitar la aguja. El desplazamiento descarta lo que cae fuera de MIDI 0..127; los `targetOffsetCents` guardados no
+  se reescriben (se re-basan al recalcular).
+- **Aguja:** los cents que se pintan son los suavizados (`displayCents`); `highlightGridCell` se llama dos veces por tick.
+- **Fixture (fase 4):** `tests/fixtures/temperament-vectors.json` es un objeto con `rows[]` (5192), no un array.
+  Las 264 filas `equal`/`none` son solo **44 vectores distintos** repetidos 6 veces (`pitchCenter`/`anchor` no
+  influyen): midi 33, 45, 57, 60, 64, 67, 69, 72, 81, 93, 105 × cents {0, 30} × A4 {440, 441}, `transposition` = 0.
+  No cubren cents negativos, recorte a ±50 ni redondeos en el límite. **La fase 4 debe añadir esos casos propios**
+  (cents negativos, ±50, ±49,9, empate de redondeo, transposición, extremos MIDI) además de las 264 filas.
+  `expect.needleEven = [pct, targetPct]`; el brief usa `[0]`.
+
 ---
 
 ## 4. Adaptación al ESP32-S3 (Cardputer ADV)
