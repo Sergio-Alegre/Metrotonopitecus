@@ -2,6 +2,7 @@
 //   digits        type BPM (Enter confirms, Del erases, 3 digits auto-confirm)
 //   Up / Down     BPM +1 / -1 (hold to repeat)
 //   Left / Right  subdivision: quarters, eighths, triplets, sixteenths
+//   B             beats per bar: 1..6, rotating (6 wraps to 1)
 //   Space         start / stop
 //
 // Click timing runs in its own task so that redrawing the screen in the main
@@ -16,12 +17,14 @@
 
 namespace {
 
-constexpr int kBeatsPerBar = 4;
 constexpr uint32_t kEntryTimeoutMs = 3000;
+constexpr int kBeatRadius = 8;
+constexpr int kBeatSpacing = 40;  // distance between beat centres; 6 beats still fit in 240 px
 
 std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
 std::atomic<int> gSub{1};
+std::atomic<int> gBeats{4};
 std::atomic<uint32_t> gSeq{0};  // clicks fired since boot
 std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
 
@@ -86,7 +89,7 @@ void engineTask(void*) {
         }
 
         const int sub = gSub.load();
-        const int ticksPerBar = kBeatsPerBar * sub;
+        const int ticksPerBar = gBeats.load() * sub;
         if (idx >= ticksPerBar) idx = 0;  // subdivision changed mid-bar
         fireClick(idx, sub);
         gTickIdx.store(idx);
@@ -110,6 +113,7 @@ public:
         }
         gBpm.store(settings::get().bpm);
         gSub.store(settings::get().subdivision);
+        gBeats.store(settings::get().beats);
         gRunning.store(false);
         entry_ = "";
         lastSeq_ = gSeq.load();
@@ -128,6 +132,9 @@ public:
                     entry_ += e.ch;
                     entryAt_ = millis();
                     if (entry_.length() == 3) commitEntry();
+                } else if (e.ch == 'b') {
+                    commitEntry();
+                    setBeats(settings::get().beats % settings::kMaxBeats + 1);
                 }
                 break;
             case Key::Enter:
@@ -203,15 +210,17 @@ public:
 
         // Beats of the bar
         const int sub = s.subdivision;
+        const int beats = s.beats;
         int beat = running ? gTickIdx.load() / sub : -1;
-        if (beat >= kBeatsPerBar) beat = kBeatsPerBar - 1;
-        for (int i = 0; i < kBeatsPerBar; ++i) {
-            const int x = 60 + 40 * i;
+        if (beat >= beats) beat = beats - 1;
+        for (int i = 0; i < beats; ++i) {
+            // Centred as a group: one beat sits in the middle, more spread out symmetrically.
+            const int x = 120 + (2 * i - (beats - 1)) * (kBeatSpacing / 2);
             const uint16_t col = (i == 0) ? RED : GREEN;
             if (i == beat) {
-                c.fillCircle(x, 88, 9, col);
+                c.fillCircle(x, 88, kBeatRadius, col);
             } else {
-                c.drawCircle(x, 88, 9, DARKGREY);
+                c.drawCircle(x, 88, kBeatRadius, DARKGREY);
             }
         }
 
@@ -237,6 +246,14 @@ private:
         s.bpm = constrain(bpm, settings::kMinBpm, settings::kMaxBpm);
         gBpm.store(s.bpm);
         settings::touch();
+    }
+
+    void setBeats(int beats) {
+        auto& s = settings::get();
+        s.beats = constrain(beats, 1, settings::kMaxBeats);
+        gBeats.store(s.beats);
+        settings::touch();
+        Serial.printf("[metro] beats per bar: %d\n", s.beats);
     }
 
     void setSub(int sub) {

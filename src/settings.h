@@ -7,6 +7,7 @@ struct Settings {
     int volume = 6;          // global volume level, 0..kMaxVolume
     int bpm = 100;           // metronome tempo
     int subdivision = 1;     // metronome clicks per beat (1..4)
+    int beats = 4;           // metronome beats per bar (1..kMaxBeats)
     int targetNote = 69;     // tuner target as MIDI note (A4 = 69), C3..B5
     float refA = 442.0f;     // tuner reference for A4, in Hz
 };
@@ -16,6 +17,7 @@ namespace settings {
 constexpr int kMaxVolume = 10;
 constexpr int kMinBpm = 20;
 constexpr int kMaxBpm = 300;
+constexpr int kMaxBeats = 6;
 constexpr int kMinNote = 48;  // C3
 constexpr int kMaxNote = 83;  // B5
 constexpr float kMinRefA = 400.0f;
