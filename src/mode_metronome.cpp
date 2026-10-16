@@ -137,9 +137,9 @@ void fireClick(int idx, int sub) {
     if (idx == 0) {
         audio::click(1800.0f, 30);  // bar accent
     } else if (idx % sub == 0) {
-        audio::click(1600.0f, 30);  // beat
+        audio::click(1400.0f, 30);  // beat
     } else {
-        audio::click(1400.0f, 30);  // subdivision
+        audio::click(1200.0f, 30);  // subdivision
     }
 }
 
