@@ -203,10 +203,14 @@ public:
         c.drawString(tempo, 120, 38);
         const int numberW = c.textWidth(tempo);
 
+        // Up/Down arrows sit to the left of "BPM" (same cue as the tuner's reference A)
+        const uint16_t bpmCol = typing ? YELLOW : LIGHTGREY;
+        const int bpmX = 120 + numberW / 2 + 18;
         c.setFont(&fonts::Font2);
         c.setTextDatum(bottom_left);
-        c.setTextColor(typing ? YELLOW : LIGHTGREY);
-        c.drawString("BPM", 120 + numberW / 2 + 4, 62);
+        c.setTextColor(bpmCol);
+        c.drawString("BPM", bpmX, 62);
+        ui::drawUpDown(c, bpmX - 9, 62 - 16, bpmCol);
 
         // Beats of the bar
         const int sub = s.subdivision;
@@ -231,6 +235,12 @@ public:
         c.drawString("<", 70, 112);
         c.drawString(">", 170, 112);
         drawSubdivision(c, sub, 120, 119, CYAN);
+
+        // Key hint for the beats-per-bar rotation
+        c.setFont(&fonts::Font0);
+        c.setTextDatum(top_right);
+        c.setTextColor(LIGHTGREY);
+        c.drawString("B: beats", 236, 115);
         return true;
     }
 

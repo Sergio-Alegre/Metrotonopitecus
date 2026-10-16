@@ -15,6 +15,12 @@ constexpr int kScreenH = 135;
 constexpr int kBarH = 10;
 constexpr int kContentH = kScreenH - kBarH;
 
+// Small stacked up/down triangles (the Up/Down cursor keys), 9 px wide, 16 px tall.
+inline void drawUpDown(M5Canvas& c, int cx, int top, uint16_t col) {
+    c.fillTriangle(cx - 4, top + 6, cx + 4, top + 6, cx, top, col);
+    c.fillTriangle(cx - 4, top + 10, cx + 4, top + 10, cx, top + 16, col);
+}
+
 }  // namespace ui
 
 class Mode {

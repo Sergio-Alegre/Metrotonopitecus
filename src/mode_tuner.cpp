@@ -77,12 +77,6 @@ void drawNoteSelector(M5Canvas& c, int midi, int cy) {
     if (kNoteSharp[midi % 12]) drawSharp(c, x0 + 36, cy - 10, 18, WHITE);
 }
 
-// Small stacked up/down triangles (the Up/Down cursor keys), 9 px wide.
-void drawUpDown(M5Canvas& c, int cx, int top, uint16_t col) {
-    c.fillTriangle(cx - 4, top + 6, cx + 4, top + 6, cx, top, col);
-    c.fillTriangle(cx - 4, top + 10, cx + 4, top + 10, cx, top + 16, col);
-}
-
 class TunerMode : public Mode {
 public:
     char hotkey() const override { return 't'; }
@@ -217,7 +211,7 @@ public:
         c.setTextDatum(top_right);
         c.setTextColor(YELLOW);
         c.drawString(ref, 236, 2);
-        drawUpDown(c, 236 - c.textWidth(ref) - 9, 2, YELLOW);
+        ui::drawUpDown(c, 236 - c.textWidth(ref) - 9, 2, YELLOW);
 
         // Footer: reading (or errors) on the left, drone key hint on the right
         c.setFont(&fonts::Font0);
