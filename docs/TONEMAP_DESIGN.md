@@ -624,3 +624,18 @@ host en este equipo, así que no hay entorno de pruebas nativo.
 Con USB-CDC (HWCDC) hace falta `Serial.begin(115200)` explícito en el bench para que `Serial.print` salga; el
 puerto se reenumera tras cada reset, así que el bench espera hasta 30 s a que el host abra el puerto. Los
 registros del sistema (`E (...)`) salen aunque no se abra.
+
+### Fase 4 (bench en el Cardputer ADV, 2026-10-17)
+
+- `[test] SUMMARY: ALL PASS | FAILURES=0` (14 series, ~1000 comprobaciones; la fase de tests dura 1028 ms).
+  Paridad con el fixture de ToneMap **264/264** (máx. |Δcents| 0,00021, |Δaguja| 2e-6) y 192/192 filas extra
+  (cents negativos, ±49,9/±50,1, recorte de aguja, transposiciones, MIDI extremos, A4 415–466).
+- `sizeof(NoteState)=296`, `sizeof(Model)=37912` (presupuesto 40960). `psram=0`; heap libre con el bench: 262 KB.
+- Rebase 442→440: +7,854 c (esperado +7,851 c), 160 pulsaciones Arriba/Abajo sin deriva.
+- Equivalencia de trozos frente a fuerza bruta: desviación máx. 5,6e-4 (H=1 s), 1,9e-4 (3 s), 6,3e-5 (30 s) en flujo aleatorio.
+- Desviaciones del modelo respecto al diseño (declaradas por el implementador): `setHold(idx, nowMs)` y
+  `displayIntensity(i, nowMs)` llevan `nowMs`; un frame aporta como máximo 2000 ms; la media de History se hace en el
+  dominio de la razón de error (como ToneMap), de ahí −3,3076 c y no −3,3333 c en el caso de 1 s/2 s; `anyFading`
+  es true hasta `hold + 10 s + 600 ms`; `fadeAnchor` queda sin uso; la frecuencia→nota rechaza el frame si el mejor
+  candidato queda a más de 100 c; `-I${PROJECT_DIR}/test` pasó a `-Itest` (la ruta con `${PROJECT_DIR}` se rompía en Windows).
+- `Model` tiene constructor vacío para que viva en `.bss`; nunca crearlo en la pila.
