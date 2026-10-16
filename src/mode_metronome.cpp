@@ -19,8 +19,11 @@ namespace {
 
 constexpr uint32_t kEntryTimeoutMs = 3000;
 constexpr int kBeatRadius = 8;
-constexpr int kBeatSpacing = 40;  // distance between beat centres; 6 beats still fit in 240 px
-constexpr int kMargin = 6;        // left margin of the tempo number
+constexpr int kBeatSpacing = 26;  // distance between beat centres; 6 beats end at x=152
+constexpr int kMargin = 6;        // left margin of the tempo number and of the beats
+// Bottom row: beats from the left, "B: beats" hint at the right. The circles' bottom (centre + 8)
+// is the last row of the 125 px content area, and the hint's text is centred on the same line.
+constexpr int kBottomY = 116;
 constexpr int kRowY = 38;         // vertical centre of the tempo number
 // Vertical centre of the note heads: their bottom (centre + 3) sits on row 58, the same
 // line as the bottom of "BPM" (its caps end on row 58) and of the tempo number.
@@ -266,13 +269,13 @@ public:
         int beat = running ? gTickIdx.load() / sub : -1;
         if (beat >= beats) beat = beats - 1;
         for (int i = 0; i < beats; ++i) {
-            // Centred as a group: one beat sits in the middle, more spread out symmetrically.
-            const int x = 120 + (2 * i - (beats - 1)) * (kBeatSpacing / 2);
+            // Left-justified: the first beat stays put, more beats extend to the right.
+            const int x = kMargin + kBeatRadius + i * kBeatSpacing;
             const uint16_t col = (i == 0) ? RED : GREEN;
             if (i == beat) {
-                c.fillCircle(x, 88, kBeatRadius, col);
+                c.fillCircle(x, kBottomY, kBeatRadius, col);
             } else {
-                c.drawCircle(x, 88, kBeatRadius, DARKGREY);
+                c.drawCircle(x, kBottomY, kBeatRadius, DARKGREY);
             }
         }
 
@@ -290,9 +293,9 @@ public:
 
         // Key hint for the beats-per-bar rotation
         c.setFont(&fonts::Font0);
-        c.setTextDatum(top_right);
+        c.setTextDatum(middle_right);
         c.setTextColor(LIGHTGREY);
-        c.drawString("B: beats", 236, 115);
+        c.drawString("B: beats", 236, kBottomY);
         return true;
     }
 

@@ -45,7 +45,8 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
 - Dígitos: teclean BPM (Enter confirma, Del borra). Arriba/abajo: BPM ±1 (mantener = repetición).
 - Izquierda/derecha: subdivisión (1, 2, 3 = tresillo, 4 por pulso). Espacio: arrancar/parar.
 - `B`: pulsos por compás, de 1 a 6, rotando (tras el 6 vuelve al 1). Por defecto 4; se guarda en ajustes.
-  Un círculo por pulso, siempre centrados como grupo (uno solo va al medio). Acento en el primero.
+  Un círculo por pulso, justificados a la izquierda en la fila inferior (con 6 caben junto a la pista
+  "B: beats", a la derecha). Acento en el primero.
 
 ### Afinador
 
