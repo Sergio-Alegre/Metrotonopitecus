@@ -4,7 +4,8 @@
 //   Up / Down     BPM +1 / -1 (hold to repeat)
 //   Left / Right  subdivision: quarters, eighths, triplets, sixteenths
 //   B             beats per bar: 1..6, rotating (6 wraps to 1)
-//   Enter         tap tempo (the average of the last taps sets the BPM)
+//   Enter         tap tempo: the first press opens a measurement, the second closes it and
+//                 sets the BPM from the time between them (any other key cancels it)
 //   Space         start / stop
 //
 // Click timing runs in its own task so that redrawing the screen in the main
@@ -206,13 +207,14 @@ public:
     void leave() override {
         gRunning.store(false);
         entry_ = "";
-        tapCount_ = 0;
+        tapOpen_ = false;
         flashPending_ = false;
         ledOff();
         M5Cardputer.Display.setBrightness(userBrightness_);
     }
 
     void onKey(const KeyEvent& e) override {
+        if (e.key != Key::Enter) tapOpen_ = false;  // any other key cancels an open tap
         switch (e.key) {
             case Key::Char:
                 if (e.ch >= '0' && e.ch <= '9' && entry_.length() < 3) {
@@ -285,10 +287,6 @@ public:
             commitEntry();
             dirty_ = true;
         }
-        if (tapCount_ > 0 && millis() - tapAt_[tapCount_ - 1] > kTapResetMs) {
-            tapCount_ = 0;  // pause: the next tap starts a new measurement
-            dirty_ = true;
-        }
         const uint32_t seq = gSeq.load();
         if (seq != lastSeq_) {
             lastSeq_ = seq;
@@ -348,9 +346,9 @@ public:
 
         // Tempo on the left: the number is centred in a slot as wide as three digits
         // (so 3-digit values touch the left margin), with the Up/Down arrows on its right.
-        // Yellow marks a provisional tempo: digits being typed, or a tap series in progress.
+        // Yellow marks a provisional tempo: digits being typed, or a tap waiting for its second press.
         const bool typing = entry_.length() > 0;
-        const bool provisional = typing || tapCount_ > 0;
+        const bool provisional = typing || tapOpen_;
         const String tempo = typing ? entry_ : String(s.bpm);
         c.setFont(&fonts::Font7);
         const int slotW = c.textWidth("000");
@@ -441,21 +439,24 @@ private:
         lagCount_ = 0;
     }
 
-    // Tap tempo: the BPM is the average over the last taps (up to kTapMax). A tap after a
-    // pause of kTapResetMs starts a new series; the first tap of a series only records time.
+    // Tap tempo in two presses, no timers: the first press opens a measurement, the second
+    // closes it and sets the BPM from the time between them. The next press opens a new one,
+    // so earlier presses never leak into a later measurement. An interval outside the valid
+    // BPM range is not a tempo: too short (bounce) is ignored, too long becomes a new opening.
     void tap() {
         const uint32_t now = millis();
-        if (tapCount_ > 0 && now - tapAt_[tapCount_ - 1] > kTapResetMs) tapCount_ = 0;
-        if (tapCount_ == kTapMax) {
-            for (int i = 1; i < kTapMax; ++i) tapAt_[i - 1] = tapAt_[i];
-            --tapCount_;
+        if (tapOpen_) {
+            const uint32_t ms = now - tapStart_;
+            if (ms < 60000u / settings::kMaxBpm) return;
+            if (ms <= 60000u / settings::kMinBpm) {
+                setBpm((int)lroundf(60000.0f / ms));
+                tapOpen_ = false;
+                Serial.printf("[metro] tap: %u ms -> %d BPM\n", (unsigned)ms, settings::get().bpm);
+                return;
+            }
         }
-        tapAt_[tapCount_++] = now;
-        if (tapCount_ < 2) return;
-        const uint32_t avgMs = (tapAt_[tapCount_ - 1] - tapAt_[0]) / (tapCount_ - 1);
-        if (avgMs == 0) return;
-        setBpm((int)lroundf(60000.0f / avgMs));
-        Serial.printf("[metro] tap %d: %d BPM\n", tapCount_, settings::get().bpm);
+        tapOpen_ = true;
+        tapStart_ = now;
     }
 
     void commitEntry() {
@@ -488,10 +489,8 @@ private:
 
     String entry_;
     uint32_t entryAt_ = 0;
-    static constexpr int kTapMax = 5;              // taps averaged (4 intervals)
-    static constexpr uint32_t kTapResetMs = 2000;  // pause that ends a tap series
-    uint32_t tapAt_[kTapMax] = {};
-    int tapCount_ = 0;
+    bool tapOpen_ = false;    // first Enter pressed, waiting for the second
+    uint32_t tapStart_ = 0;   // millis() of the first press
     uint32_t lastSeq_ = 0;
     bool dirty_ = true;
 
