@@ -21,7 +21,10 @@ constexpr uint32_t kEntryTimeoutMs = 3000;
 constexpr int kBeatRadius = 8;
 constexpr int kBeatSpacing = 40;  // distance between beat centres; 6 beats still fit in 240 px
 constexpr int kMargin = 6;        // left margin of the tempo number
-constexpr int kRowY = 38;         // vertical centre of the tempo / subdivision row
+constexpr int kRowY = 38;         // vertical centre of the tempo number
+// Vertical centre of the note heads: their bottom (centre + 3) sits on row 58, the same
+// line as the bottom of "BPM" (its caps end on row 58) and of the tempo number.
+constexpr int kSubBaseY = 55;
 constexpr int kSubCx = 196;       // horizontal centre of the subdivision figure
 // Four sixteenths span x-20..x+21 around the centre; the arrow glyphs are ~10 px wide
 // and sit about 7 px outside that.
@@ -279,10 +282,11 @@ public:
         c.setFont(&fonts::Font2);
         c.setTextDatum(middle_center);
         c.setTextColor(sub > 1 ? CYAN : DARKGREY);
-        c.drawString("<", kSubCx - kSubArrowDx, kRowY + 2);
+        c.drawString("<", kSubCx - kSubArrowDx, kSubBaseY - 8);
         c.setTextColor(sub < 4 ? CYAN : DARKGREY);
-        c.drawString(">", kSubCx + kSubArrowDx, kRowY + 2);
-        drawSubdivision(c, sub, kSubCx, kRowY + 10, CYAN);
+        c.drawString(">", kSubCx + kSubArrowDx, kSubBaseY - 8);
+        // Four sixteenths look right-heavy between the arrows: nudge them 2 px left.
+        drawSubdivision(c, sub, kSubCx - (sub == 4 ? 2 : 0), kSubBaseY, CYAN);
 
         // Key hint for the beats-per-bar rotation
         c.setFont(&fonts::Font0);
