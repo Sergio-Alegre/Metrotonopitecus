@@ -26,6 +26,11 @@ a través de Launcher: WebUI (opción WUI de Launcher, subida desde el navegador
 ## Convenciones
 
 - Pasos pequeños, un commit por paso funcional. Compilar antes de cada commit.
+- **Claude hace siempre commit y push con cada compilación de firmware** (`pio run`, también los
+  entornos de diagnóstico): tras una compilación correcta, `git add` de los cambios, commit con mensaje
+  descriptivo y `git push`, sin esperar a que Sergio lo pida. Si la compilación falla no se commitea. Si el
+  push falla (red, autenticación), decirlo claramente y reintentar después; no dar nada por subido sin
+  haberlo comprobado.
 - No añadir dependencias sin decirlo. Fijar versiones de librerías en `platformio.ini`.
 - Claude no puede oír el altavoz ni ver la pantalla: lo que se pueda verificar, que salga por serie.
 - El diseño y los criterios de aceptación viven en `docs/SPEC.md`. Leerlo antes de trabajar.
