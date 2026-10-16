@@ -589,6 +589,38 @@ host en este equipo, así que no hay entorno de pruebas nativo.
 - El cambio de `main.cpp` es de 3 líneas en vez de una; se considera dentro del espíritu de §4.7.
 - Se usa el esquema de callback (§2); el sondeo queda de alternativa.
 
-## 12. Valores medidos (se rellena en fases 3 y 4)
+## 12. Valores medidos
 
-_Pendiente._
+### Fase 3 (bench en el Cardputer ADV, 2026-10-17, COM9)
+
+**Decisión: 32 kHz, WINDOW 2048, HOP 1024, maxLag 720.**
+
+- **Reloj I2S a 32 kHz:** 31,2495 trozos/s (nominal 31,25), `ratio = 0.99999` → `kRateTrim = 1.0`. El ES8311 engancha bien.
+  `starved=0`, `torn=0`, `recfail=0`, `badcb=0`. Los primeros ~1,5 s de captura salen con pocos trozos (calentamiento).
+- **Tiempo por análisis (32 kHz, maxLag 720):** **9,25 ms** (media y máximo 9,26 ms, 50 ejecuciones), a la
+  estimación del diseño. El tiempo no depende de la señal (la suma directa es de coste fijo). `prepare` 0,2 ms.
+  Ventana bajo la puerta de ruido: 0,2 ms. A 16 kHz / maxLag 360: 5,2 ms.
+- **En vivo, sala en silencio, con carga de dibujo simulada (sprite 240×125 cada 50 ms):** 31,0 análisis/s
+  (`skipped=2` al activar la carga), push a pantalla 12,1 ms, dibujo 2,3 ms, `loop_max` 19 ms. Falta medirlo con
+  análisis completo (9 ms) + dibujo real: PARADA A / fase 5.
+- **Precisión sintética (A4=440, N=2048, ±20 c):**
+
+| fs | Onda | Errores de octava | Hasta C6 | Octava 7 |
+|---|---|---|---|---|
+| 32 kHz | senoidal | 0 | ≤ 0,05 c | **≤ 1,65 c** (cumple ±3 c) |
+| 32 kHz | diente de sierra | 0 | ≤ 0,14 c hasta C5; C6: −0,45 / −0,96 / **+1,39 c** | C7 +1,6 / +4,6 / +2,5 c; A7 +8,7 / +4,7 / −0,7 c; B7 +7,6 / +4,5 / +0,2 c |
+| 16 kHz | cualquiera | **7** (octava 7) | hasta 4,6 c | hasta 11 c |
+
+  16 kHz queda descartado (errores de octava en la octava 7). A 32 kHz, C2–C5 es exacto (< 0,15 c).
+- **Fuera de criterio (brief §4.1 y §6 A):** con diente de sierra (peor caso: armónicos de amplitud 1/n, picos
+  estrechos en la NSDF) la octava 7 sale **sesgada hacia arriba hasta +8,7 c**, y C6 +20 c a +1,39 c (criterio ≤ 1 c).
+  La senoidal cumple en todo el rango. El sesgo es sistemático y viene de la interpolación parabólica de pitchy
+  sobre picos estrechos (el prototipo en Python lo predijo igual); en ToneMap web con 44,1/48 kHz es menor. **Se
+  acepta como "best effort" en la octava 7 para timbres ricos en armónicos** y se revisa con el violín/flauta
+  reales en la PARADA A. Si molesta, la mejora (desviarse de pitchy) sería refinar el pico con interpolación
+  de orden superior o sobremuestrear el entorno del pico.
+
+### Nota sobre el puerto serie
+Con USB-CDC (HWCDC) hace falta `Serial.begin(115200)` explícito en el bench para que `Serial.print` salga; el
+puerto se reenumera tras cada reset, así que el bench espera hasta 30 s a que el host abra el puerto. Los
+registros del sistema (`E (...)`) salen aunque no se abra.

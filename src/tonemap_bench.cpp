@@ -481,10 +481,11 @@ void setup() {
     M5Cardputer.Display.setCursor(2, 2);
     M5Cardputer.Display.println("ToneMap bench - see serial");
 
-    // USB CDC: wait for the host (up to ~3 s) so the first lines are not lost.
+    // USB CDC re-enumerates after a reset: wait for the host (up to 30 s) so the first lines are not lost.
+    Serial.begin(115200);
     const uint32_t t0 = millis();
-    while (!Serial && millis() - t0 < 3000) delay(10);
-    delay(200);
+    while (!Serial && millis() - t0 < 30000) delay(10);
+    delay(500);
 
     audio::begin();
 
@@ -493,9 +494,13 @@ void setup() {
     runTiming();
 
     // Live capture exactly as ToneMap's enter() does it: attach, micStart, start.
+    Serial.println("[stage] attach");
     tonemap_audio::attach();
+    Serial.println("[stage] micStart");
     liveRunning = audio::micStart();
+    Serial.printf("[stage] micStart returned %d\n", (int)liveRunning);
     if (liveRunning) tonemap_audio::start();
+    Serial.println("[stage] start done");
     Serial.printf("[live] microphone %s, fs=%u, window=%u hop=%u\n", liveRunning ? "started" : "FAILED to start",
                   (unsigned)tonemap_audio::kSampleRate, (unsigned)tonemap_audio::kWindow, (unsigned)tonemap_audio::kHop);
 
