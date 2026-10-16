@@ -23,8 +23,8 @@ constexpr int kBeatSpacing = 40;  // distance between beat centres; 6 beats stil
 constexpr int kMargin = 6;        // left margin of the tempo number
 constexpr int kRowY = 38;         // vertical centre of the tempo / subdivision row
 constexpr int kSubCx = 198;       // horizontal centre of the subdivision figure
-// Four sixteenths span about x-17..x+18 around the centre; arrows sit 4 px outside that.
-constexpr int kSubArrowDx = 27;
+// Four sixteenths span about x-20..x+20 around the centre; arrows sit 4 px outside that.
+constexpr int kSubArrowDx = 29;
 
 std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
@@ -33,33 +33,72 @@ std::atomic<int> gBeats{4};
 std::atomic<uint32_t> gSeq{0};  // clicks fired since boot
 std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
 
+// Note head: a filled ellipse tilted so its right end rises (like engraved notation),
+// drawn pixel by pixel because the canvas has no rotated ellipse. Returns the column of
+// its rightmost pixel and the lowest row of that column, where the stem is tangent.
+struct HeadEdge {
+    int x;
+    int y;
+};
+
+HeadEdge drawHead(M5Canvas& c, int hx, int hy, uint16_t col) {
+    constexpr float kA = 4.8f;                  // semi-axis along the tilt
+    constexpr float kB = 3.2f;                  // semi-axis across it
+    constexpr float kTilt = 30.0f * PI / 180.0f;
+    const float cs = cosf(kTilt);
+    const float sn = sinf(kTilt);
+    auto inside = [&](int dx, int dy) {
+        const float u = dx * cs - dy * sn;  // along the major axis (right end up)
+        const float v = dx * sn + dy * cs;
+        return (u * u) / (kA * kA) + (v * v) / (kB * kB) <= 1.0f;
+    };
+
+    int right = -100;
+    for (int dy = -6; dy <= 6; ++dy)
+        for (int dx = -7; dx <= 7; ++dx)
+            if (inside(dx, dy) && dx > right) right = dx;
+
+    int lowest = -100;
+    for (int dy = -6; dy <= 6; ++dy) {
+        for (int dx = -7; dx <= 7; ++dx) {
+            if (!inside(dx, dy)) continue;
+            c.drawPixel(hx + dx, hy + dy, col);
+            if (dx == right && dy > lowest) lowest = dy;
+        }
+    }
+    return {hx + right, hy + lowest};
+}
+
 // Draws the note figure for a subdivision (1 = quarter, 2 = two beamed
 // eighths, 3 = beamed triplet with a "3", 4 = four beamed sixteenths).
 // cx: horizontal centre, base: y of the note heads' centre.
-// Strokes are thin: 1 px stems, 2 px beams.
+// Strokes are thin: 1 px stems (flush with the right edge of the head), 2 px beams.
 void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
-    constexpr int kStem = 14;
-    constexpr int kSpacing[] = {0, 0, 14, 14, 9};
+    constexpr int kStem = 15;
+    constexpr int kSpacing[] = {0, 0, 14, 14, 11};
     const int n = sub;  // number of notes equals the subdivision
     const int span = kSpacing[sub] * (n - 1);
     const int x0 = cx - span / 2;
+    const int top = base - kStem;
 
+    int firstStem = 0;
+    int lastStem = 0;
     for (int i = 0; i < n; ++i) {
-        const int hx = x0 + i * kSpacing[sub];
-        c.fillEllipse(hx, base, 4, 3, col);
-        c.fillRect(hx + 3, base - kStem, 1, kStem, col);  // stem on the right of the head
+        const HeadEdge e = drawHead(c, x0 + i * kSpacing[sub], base, col);
+        c.fillRect(e.x, top, 1, e.y - top + 1, col);
+        if (i == 0) firstStem = e.x;
+        lastStem = e.x;
     }
     if (n > 1) {
-        const int left = x0 + 3;
-        const int width = span + 1;
-        c.fillRect(left, base - kStem, width, 2, col);  // main beam
-        if (sub == 4) c.fillRect(left, base - kStem + 4, width, 2, col);  // second beam
+        const int width = lastStem - firstStem + 1;
+        c.fillRect(firstStem, top, width, 2, col);  // main beam
+        if (sub == 4) c.fillRect(firstStem, top + 4, width, 2, col);  // second beam
     }
     if (sub == 3) {
         c.setFont(&fonts::Font0);
         c.setTextDatum(bottom_center);
         c.setTextColor(col);
-        c.drawString("3", cx + 1, base - kStem - 3);
+        c.drawString("3", (firstStem + lastStem) / 2, top - 3);
     }
 }
 
@@ -234,13 +273,14 @@ public:
         }
 
         // Subdivision on the same row as the tempo: note figure between < >. The arrows stay
-        // at fixed distances (set by the widest figure, four sixteenths) and an arrow is
-        // hidden when its key cannot go any further.
+        // at fixed distances (set by the widest figure, four sixteenths) and turn grey when
+        // their key cannot go any further.
         c.setFont(&fonts::Font2);
         c.setTextDatum(middle_center);
-        c.setTextColor(CYAN);
-        if (sub > 1) c.drawString("<", kSubCx - kSubArrowDx, kRowY + 2);
-        if (sub < 4) c.drawString(">", kSubCx + kSubArrowDx, kRowY + 2);
+        c.setTextColor(sub > 1 ? CYAN : DARKGREY);
+        c.drawString("<", kSubCx - kSubArrowDx, kRowY + 2);
+        c.setTextColor(sub < 4 ? CYAN : DARKGREY);
+        c.drawString(">", kSubCx + kSubArrowDx, kRowY + 2);
         drawSubdivision(c, sub, kSubCx, kRowY + 6, CYAN);
 
         // Key hint for the beats-per-bar rotation
