@@ -75,6 +75,136 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
 - Detección: micrófono, autocorrelación normalizada restringida a ±2 semitonos de la nota objetivo.
   En el ADV micrófono y altavoz comparten reloj I2S: con el drone sonando la detección se pausa.
 
+### Afinador — vista ToneMap
+
+Segunda vista del afinador, portada de [tonemap.live](https://github.com/crossrhythm/tonemap.live) (MIT).
+Brief completo, referencia técnica y plan por fases: [`TONEMAP_BRIEF.md`](TONEMAP_BRIEF.md). Rama `feature/tonemap`.
+Los criterios de aceptación (brief §6) se marcan al final de esta sección.
+
+#### Entrar y salir
+
+- Estando en el afinador, **`T` alterna** entre la vista clásica (aguja + nota objetivo, la de ahora) y la vista
+  **ToneMap**. Hoy `T` dentro del afinador no hace nada.
+- Al llegar al afinador desde otro modo, se abre **la última vista usada** (persistida en NVS).
+- La barra inferior no cambia: sigue mostrando `T:Tuner` resaltado. Las demás teclas globales siguen igual
+  (`M`, `G`, `A`, volumen `-`/`=`).
+- Al entrar en ToneMap con el drone sonando, el drone se para y el micro arranca (micro y altavoz son
+  excluyentes en el ADV). En ToneMap **no hay drone**.
+
+#### Distribución de pantalla (lienzo de contenido 240 × 125)
+
+```
+y=0   ┌─────────────────────────────────────────────┐
+      │ A4  +3.2c  442.6 Hz        Bb  A=442  ▮▮▮▯ │  franja de info, Font0 (6×8 px por carácter)
+y=15  ├─────────────────────────────────────────────┤  línea 1 px gris oscuro
+y=17  ├───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┤
+      │C7 │C# │D  │D# │E  │F  │F# │G  │G# │A  │A# │B  │  6 filas × 18 px = 108 px (y 17..124)
+      │C6 │   │   │   │   │   │   │   │   │   │   │   │  12 columnas × 20 px = 240 px
+      │C5 │   │   │   │   │   │   │   │   │   │   │   │  fila de arriba = octava más aguda
+      │C4 │   │   │   │▒▒ │   │   │   │   │███│   │   │
+      │C3 │   │   │   │   │   │   │   │   │   │   │   │
+      │C2 │   │   │   │   │   │   │   │   │   │   │   │
+y=125 └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
+      (barra de modos de main.cpp, sin cambios)
+```
+
+Los píxeles exactos de la franja los ajusta el implementador; la cuadrícula es fija: 20 × 18 px por celda,
+C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escrito 36..107).
+
+#### Celdas
+
+- Líneas de cuadrícula 1 px `#374151`. Fondo `#000000`.
+- **Etiqueta:** solo el nombre de la nota (`C#`, o `Db` con bemoles); la columna C lleva además la octava
+  (`C4`). Font0, color `#4b5563` mientras la celda no se ha tocado nunca, blanco cuando ya se ha tocado
+  (`visited`).
+- **Color de fondo** = mezcla entre negro y el color de tendencia según la intensidad (§3.4).
+  Paleta fija (la de ToneMap): alto `#FFAA00`, centro `rgb(34,197,94)`, bajo `#0056D6`.
+- **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): borde blanco interior de 2 px,
+  una línea de referencia negra de 2 px en el centro vertical de la celda y la **aguja**: barra roja
+  `#ef4444` de 2 px de alto a lo ancho de la celda. Posición vertical: arriba = alto. Recorrido del 10 % al
+  90 % de la altura para −50…+50 cents (fórmula en §3.5).
+
+#### Franja de información (fila superior)
+
+- Izquierda: nota detectada y octava escrita (`A4`), cents con signo y un decimal (`+3.2c`), frecuencia real en Hz.
+  Los cents se pintan en **verde** si estás dentro de la zona muerta del modo (§3.3), blancos si no. Sin nota
+  válida: `--`.
+- Fuera de rango (nota escrita < C2 o > B7): en lugar de la nota, `Below range` / `Above range`.
+- Derecha: transposición si no es C (`Bb`, `Eb`, `F`), `A=442` (la misma La del afinador clásico) y un
+  medidor de nivel del micro (unos 30 px) con una marca en el umbral de la puerta de ruido.
+- **Mensajes transitorios** al cambiar un ajuste: durante 1,5 s ocupan el sitio de nota/cents/Hz (la parte
+  derecha sigue visible): `Sensitivity: Hard`,
+  `History: 30 s`, `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`,
+  `LED: off`, `Map cleared`. En pausa: `Paused (Space)` fijo.
+
+#### Teclas en la vista ToneMap
+
+| Tecla | Acción |
+|---|---|
+| `T` | Volver a la vista clásica |
+| Arriba / Abajo | La de referencia ±1 Hz (la misma `refA` del clásico, 400–480, persistente) |
+| `S` | Sensibilidad: Relaxed → Medium → Hard → … |
+| `H` | History: 1 s → 3 s → 30 s → Unlimited → … |
+| `C` | Color hold: 5 s → 15 s → 30 s → 2 min → 5 min → No fade → … |
+| `N` | Puerta de ruido: None → Low → Med → High → … |
+| `K` | Transposición: C → Bb → Eb → F → … |
+| `F` | Sostenidos ↔ bemoles en etiquetas y franja |
+| `L` | LED de afinado on/off |
+| `R` | Borrar el mapa (todas las celdas) |
+| `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
+| Izquierda / Derecha | Sin uso en la v1 (reservadas para temperamentos en el futuro) |
+
+Las teclas globales (`M`, `G`, `A`, `-`, `=`) las sigue capturando `main.cpp` antes que el modo: no usar esas letras.
+
+#### Ajustes, valores por defecto y persistencia
+
+Todos se guardan en NVS con el mecanismo diferido que ya existe (`settings::touch()`).
+
+| Ajuste | Valores | Defecto | Clave NVS (≤15 car.) |
+|---|---|---|---|
+| Vista del afinador | classic / tonemap | classic | `tunerView` |
+| Sensibilidad | relaxed / medium / hard | medium | `tmSens` |
+| History | 1 s / 3 s / 30 s / unlimited | 3 s | `tmHist` |
+| Color hold | 5 s / 15 s / 30 s / 120 s / 300 s / no fade | 30 s | `tmHold` |
+| Puerta de ruido | none / low / med / high | low | `tmGate` |
+| Transposición | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
+| Alteraciones | sharps / flats | sharps | `tmFlats` |
+| LED de afinado | on / off | on | `tmLed` |
+| La de referencia | 400–480 Hz | 442 (ya existe) | `refA` (ya existe) |
+
+Los valores de transposición son los de ToneMap (semitonos; nota escrita = nota de concierto − valor, ver §3.2).
+Añadir A (clarinete en La, −3) es trivial si Sergio lo pide más adelante.
+
+#### El mapa de calor
+
+- Comportamiento = ToneMap (§3). El mapa vive en RAM **mientras el dispositivo esté encendido**: sobrevive a
+  cambiar de modo o de vista y volver; se borra con `R` o al apagar. No se guarda en flash ni en SD.
+- Cambiar la La **re-puntúa** el historial (los colores se recalculan contra la nueva referencia), como en ToneMap.
+- Cambiar la transposición **desplaza** el mapa (la misma nota de concierto cae en otra celda escrita), como en
+  ToneMap. Lo que se salga del rango almacenado se pierde.
+- Cambiar sensibilidad o History recalcula los colores de todas las celdas desde el historial guardado.
+
+#### LED
+
+- Con `LED` on: el LED RGB (GPIO 21, `neopixelWrite`) se enciende **verde** mientras la nota activa está dentro
+  de la zona muerta del modo, y se apaga en cuanto sale, no hay nota o se pausa.
+- Restricción de hardware ya conocida (ver SPEC, metrónomo): el LED se alimenta del mismo pin que la
+  retroiluminación y **solo funciona con la pantalla a brillo 255**. Con LED on, la vista ToneMap guarda el brillo
+  del usuario, pone 255 y lo restaura al salir de la vista o del modo, o al poner LED off.
+  Repetir cada orden del LED dos veces (a los 6 y 12 ms), como hace el metrónomo.
+- No refactorizar el código del LED del metrónomo; duplicar el mínimo necesario en el código de ToneMap.
+
+#### Fuera de alcance en la v1
+
+Temperamentos y centro tonal, stretch Railsback, Note View (Ribbons/Balloons), grabador y WAV, editor de paleta,
+AGC, estadísticas, guardar el mapa en SD, cambiar el rango visible. La arquitectura no debe impedir añadir
+temperamentos después (columnas de ancho variable): la conversión frecuencia → nota debe pasar por una única
+función "offset de destino por nota", como en ToneMap.
+
+#### Criterios de aceptación
+
+Ver brief §6. Casillas A (bench) y B (dispositivo) se marcan aquí en la fase 7.
+
 ### Juego (Snake básico)
 
 - Cursores giran la cabeza; tubo verde; puntos rojos; muere con pared o con su cuerpo.
