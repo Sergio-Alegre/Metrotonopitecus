@@ -209,11 +209,14 @@ public:
 #ifdef LED_DEBUG
                 else if (e.ch == 'l' || e.ch == 'k') {
                     // Hardware test, steady white for 2 s. L: screen brightness as it is.
-                    // K: screen brightness forced to maximum first (GPIO38 is shared between
-                    // the backlight PWM and the LED power switch), restored afterwards.
+                    // K: screen brightness forced to the next level of kTestLevels first
+                    // (GPIO38 is shared between the backlight PWM and the LED power switch),
+                    // restored afterwards. Press K repeatedly to walk down the levels.
                     if (e.ch == 'k') {
-                        savedBrightness_ = M5Cardputer.Display.getBrightness();
-                        M5Cardputer.Display.setBrightness(255);
+                        constexpr uint8_t kTestLevels[] = {255, 224, 192, 160, 128, 96};
+                        if (!restoreBrightness_) savedBrightness_ = M5Cardputer.Display.getBrightness();
+                        testLevel_ = kTestLevels[testIdx_++ % sizeof(kTestLevels)];
+                        M5Cardputer.Display.setBrightness(testLevel_);
                         restoreBrightness_ = true;
                     }
                     ledSet(255, 255, 255);
@@ -369,8 +372,8 @@ public:
 #ifdef LED_DEBUG
         // Diagnostic overlay: is the LED there, did it start, how many flashes, delay after the click
         char dbg[64];
-        snprintf(dbg, sizeof(dbg), "LED bl=%d n=%u lag=%.0fms L/K=test", (int)M5Cardputer.Display.getBrightness(),
-                 (unsigned)lagCount_, lastLagUs_ / 1000.0f);
+        snprintf(dbg, sizeof(dbg), "bl=%d n=%u lag=%.0fms test=%d (K)", (int)M5Cardputer.Display.getBrightness(),
+                 (unsigned)lagCount_, lastLagUs_ / 1000.0f, (int)testLevel_);
         c.setFont(&fonts::Font0);
         c.setTextDatum(top_left);
         c.setTextColor(YELLOW);
@@ -443,6 +446,8 @@ private:
     uint32_t lastLagUs_ = 0;
 #ifdef LED_DEBUG
     uint8_t savedBrightness_ = 0;
+    uint8_t testLevel_ = 0;
+    uint8_t testIdx_ = 0;
     bool restoreBrightness_ = false;
 #endif
 };
