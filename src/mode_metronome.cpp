@@ -130,13 +130,16 @@ void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
     }
 }
 
+// Same synth tone for the three clicks, falling in pitch with importance (6 : 4 : 3.3).
+// The speaker is weak below ~1 kHz and very short beeps sound faint, so the subdivision
+// is not lower or shorter than the beat.
 void fireClick(int idx, int sub) {
     if (idx == 0) {
         audio::click(1800.0f, 30);  // bar accent
     } else if (idx % sub == 0) {
         audio::click(1200.0f, 25);  // beat
     } else {
-        audio::click(800.0f, 15);   // subdivision
+        audio::click(1000.0f, 25);  // subdivision
     }
 }
 
