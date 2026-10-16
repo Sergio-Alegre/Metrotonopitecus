@@ -40,6 +40,11 @@ constexpr int kSubCx = 196;       // horizontal centre of the subdivision figure
 // and sit about 7 px outside that.
 constexpr int kSubArrowDx = 33;
 
+// The Cardputer ADV's RGB LED (SK6812) is on GPIO21. M5Unified's M5.Led does nothing with this
+// Arduino core (it needs ESP-IDF 5), so it is driven with the core's own neopixelWrite().
+constexpr int kLedPin = 21;
+void ledSet(uint8_t r, uint8_t g, uint8_t b) { neopixelWrite(kLedPin, r, g, b); }
+
 std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
 std::atomic<int> gSub{1};
@@ -180,10 +185,6 @@ public:
         lastSeq_ = gSeq.load();
         dirty_ = true;
 
-        M5.Led.setBrightness(255);  // full brightness: the flash is a reference when the click is hard to hear
-        ledBegin_ = M5.Led.begin();
-        Serial.printf("[led] RGB LED %s, begin %s\n", M5.Led.isEnabled() ? "available" : "NOT available",
-                      ledBegin_ ? "ok" : "FAILED");
         ledOff();
     }
 
@@ -206,8 +207,16 @@ public:
                     setBeats(settings::get().beats % settings::kMaxBeats + 1);
                 }
 #ifdef LED_DEBUG
-                else if (e.ch == 'l') {  // hardware test: steady white for 2 s
-                    M5.Led.setAllColor(255, 255, 255);
+                else if (e.ch == 'l' || e.ch == 'k') {
+                    // Hardware test, steady white for 2 s. L: screen brightness as it is.
+                    // K: screen brightness forced to maximum first (GPIO38 is shared between
+                    // the backlight PWM and the LED power switch), restored afterwards.
+                    if (e.ch == 'k') {
+                        savedBrightness_ = M5Cardputer.Display.getBrightness();
+                        M5Cardputer.Display.setBrightness(255);
+                        restoreBrightness_ = true;
+                    }
+                    ledSet(255, 255, 255);
                     ledOn_ = true;
                     ledOffAt_ = millis() + 2000;
                 }
@@ -278,14 +287,13 @@ public:
     void afterPush() override {
         if (!flashPending_) return;
         flashPending_ = false;
-        if (!M5.Led.isEnabled()) return;
 
         const int beatMs = 60000 / gBpm.load();
         const int flashMs = constrain(beatMs / 5, kFlashMinMs, kFlashMaxMs);
         if (flashAccent_) {
-            M5.Led.setAllColor(255, 0, 0);
+            ledSet(255, 0, 0);
         } else {
-            M5.Led.setAllColor(0, 255, 0);
+            ledSet(0, 255, 0);
         }
         ledOn_ = true;
         ledOffAt_ = millis() + flashMs;
@@ -361,8 +369,8 @@ public:
 #ifdef LED_DEBUG
         // Diagnostic overlay: is the LED there, did it start, how many flashes, delay after the click
         char dbg[64];
-        snprintf(dbg, sizeof(dbg), "LED inst=%d begin=%d n=%u lag=%.0fms L=test", M5.Led.isEnabled() ? 1 : 0,
-                 ledBegin_ ? 1 : 0, (unsigned)lagCount_, lastLagUs_ / 1000.0f);
+        snprintf(dbg, sizeof(dbg), "LED bl=%d n=%u lag=%.0fms L/K=test", (int)M5Cardputer.Display.getBrightness(),
+                 (unsigned)lagCount_, lastLagUs_ / 1000.0f);
         c.setFont(&fonts::Font0);
         c.setTextDatum(top_left);
         c.setTextColor(YELLOW);
@@ -374,7 +382,13 @@ public:
 private:
     void ledOff() {
         ledOn_ = false;
-        if (M5.Led.isEnabled()) M5.Led.setAllColor(0, 0, 0);
+        ledSet(0, 0, 0);
+#ifdef LED_DEBUG
+        if (restoreBrightness_) {
+            M5Cardputer.Display.setBrightness(savedBrightness_);
+            restoreBrightness_ = false;
+        }
+#endif
     }
 
     void reportLag() {
@@ -427,7 +441,10 @@ private:
     uint32_t lagMaxUs_ = 0;
     uint32_t lagCount_ = 0;
     uint32_t lastLagUs_ = 0;
-    bool ledBegin_ = false;
+#ifdef LED_DEBUG
+    uint8_t savedBrightness_ = 0;
+    bool restoreBrightness_ = false;
+#endif
 };
 
 }  // namespace
