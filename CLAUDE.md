@@ -12,16 +12,30 @@ Idioma de trabajo: español (código y comentarios en inglés).
 
 ## Regla crítica de despliegue
 
-**Nunca flashear por USB (esptool/`pio run -t upload`) sobre el dispositivo.** Sobrescribiría M5Launcher.
-Se compila el binario de **aplicación** (`.pio/build/<env>/firmware.bin`, NO el "merged") y se instala
-a través de Launcher: WebUI (opción WUI de Launcher, subida desde el navegador), tarjeta SD u OTA.
+**Por defecto, Claude no flashea por USB** (esptool/`pio run -t upload`): pisaría M5Launcher.
+Se compila el binario de **aplicación** (`.pio/build/<env>/firmware.bin`, NO el "merged") y Sergio lo
+instala a través de Launcher: WebUI (opción WUI de Launcher, subida desde el navegador), tarjeta SD u OTA.
+
+**Flasheo por USB, solo con permiso de Sergio.** Claude flashea por USB únicamente cuando Sergio lo pide:
+- Una orden puntual ("flashea", "súbelo", "dame firmware nuevo" con el Cardputer conectado por USB) vale
+  para ese firmware. Si pide firmware nuevo y el dispositivo está conectado, se entiende que se flashea.
+- Si Sergio dice "en esta sesión flashea siempre" (o equivalente), se flashea tras cada compilación
+  correcta hasta que termine la sesión o diga lo contrario. No se arrastra a otras sesiones.
+- Sin puerto serie visible (`pio device list` vacío) no se intenta nada: se deja `firmware.bin` listo para
+  subirlo por WebUI y se avisa.
+- Flashear por USB sustituye a Launcher en ese slot; Sergio lo sabe y lo asume. Recuperar Launcher es cosa suya.
+- Comando: `pio run -t upload --upload-port <COM>` (en este equipo, `COM4`; confirmar con `pio device list`).
+  No hace falta pulsar nada en el dispositivo: esptool lo pone en modo descarga por USB nativo y lo reinicia
+  al terminar. La pantalla se queda en negro unos segundos y luego arranca la app; es normal, no es un fallo.
+- Tras flashear, avisar a Sergio de qué debe comprobar en pantalla/oído; Claude no puede verlo.
 
 ## Comandos
 
 - Compilar: `pio run`
 - Monitor serie (para depurar lo que Claude no puede oír/ver): `pio device monitor`
 - Desplegar: `pio run` y luego subir `firmware.bin` por la WebUI de Launcher (ver `docs/DEPLOY.md`
-  cuando exista; hasta entonces el primer despliegue es manual).
+  cuando exista; hasta entonces el primer despliegue es manual), o flashear por USB si Sergio lo pide
+  (ver la regla de arriba).
 
 ## Convenciones
 
