@@ -181,7 +181,9 @@ public:
         dirty_ = true;
 
         M5.Led.setBrightness(255);  // full brightness: the flash is a reference when the click is hard to hear
-        Serial.printf("[led] RGB LED %s\n", M5.Led.isEnabled() ? "available" : "NOT available");
+        ledBegin_ = M5.Led.begin();
+        Serial.printf("[led] RGB LED %s, begin %s\n", M5.Led.isEnabled() ? "available" : "NOT available",
+                      ledBegin_ ? "ok" : "FAILED");
         ledOff();
     }
 
@@ -203,6 +205,13 @@ public:
                     commitEntry();
                     setBeats(settings::get().beats % settings::kMaxBeats + 1);
                 }
+#ifdef LED_DEBUG
+                else if (e.ch == 'l') {  // hardware test: steady white for 2 s
+                    M5.Led.setAllColor(255, 255, 255);
+                    ledOn_ = true;
+                    ledOffAt_ = millis() + 2000;
+                }
+#endif
                 break;
             case Key::Enter:
                 commitEntry();
@@ -283,6 +292,7 @@ public:
 
         // Delay between the click and the LED (= the screen's own delay), for the serial report
         const uint32_t lagUs = (uint32_t)esp_timer_get_time() - gClickUs.load();
+        lastLagUs_ = lagUs;
         lagSumUs_ += lagUs;
         if (lagCount_ == 0 || lagUs < lagMinUs_) lagMinUs_ = lagUs;
         if (lagUs > lagMaxUs_ || lagCount_ == 0) lagMaxUs_ = lagUs;
@@ -347,6 +357,17 @@ public:
         c.setTextDatum(bottom_right);
         c.setTextColor(LIGHTGREY);
         c.drawString("B: beats", 236, kHintBottomY);
+
+#ifdef LED_DEBUG
+        // Diagnostic overlay: is the LED there, did it start, how many flashes, delay after the click
+        char dbg[64];
+        snprintf(dbg, sizeof(dbg), "LED inst=%d begin=%d n=%u lag=%.0fms L=test", M5.Led.isEnabled() ? 1 : 0,
+                 ledBegin_ ? 1 : 0, (unsigned)lagCount_, lastLagUs_ / 1000.0f);
+        c.setFont(&fonts::Font0);
+        c.setTextDatum(top_left);
+        c.setTextColor(YELLOW);
+        c.drawString(dbg, 4, 90);
+#endif
         return true;
     }
 
@@ -405,6 +426,8 @@ private:
     uint32_t lagMinUs_ = 0;
     uint32_t lagMaxUs_ = 0;
     uint32_t lagCount_ = 0;
+    uint32_t lastLagUs_ = 0;
+    bool ledBegin_ = false;
 };
 
 }  // namespace
