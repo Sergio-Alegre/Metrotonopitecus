@@ -22,9 +22,10 @@ constexpr int kBeatRadius = 8;
 constexpr int kBeatSpacing = 40;  // distance between beat centres; 6 beats still fit in 240 px
 constexpr int kMargin = 6;        // left margin of the tempo number
 constexpr int kRowY = 38;         // vertical centre of the tempo / subdivision row
-constexpr int kSubCx = 198;       // horizontal centre of the subdivision figure
-// Four sixteenths span about x-20..x+20 around the centre; arrows sit 4 px outside that.
-constexpr int kSubArrowDx = 29;
+constexpr int kSubCx = 196;       // horizontal centre of the subdivision figure
+// Four sixteenths span x-20..x+21 around the centre; the arrow glyphs are ~10 px wide
+// and sit about 7 px outside that.
+constexpr int kSubArrowDx = 33;
 
 std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
@@ -74,7 +75,7 @@ HeadEdge drawHead(M5Canvas& c, int hx, int hy, uint16_t col) {
 // cx: horizontal centre, base: y of the note heads' centre.
 // Strokes are thin: 1 px stems (flush with the right edge of the head), 2 px beams.
 void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
-    constexpr int kStem = 15;
+    constexpr int kStem = 24;  // ~3.5 head heights (an octave on a staff); heads are ~7 px tall
     constexpr int kSpacing[] = {0, 0, 14, 14, 11};
     const int n = sub;  // number of notes equals the subdivision
     const int span = kSpacing[sub] * (n - 1);
@@ -281,7 +282,7 @@ public:
         c.drawString("<", kSubCx - kSubArrowDx, kRowY + 2);
         c.setTextColor(sub < 4 ? CYAN : DARKGREY);
         c.drawString(">", kSubCx + kSubArrowDx, kRowY + 2);
-        drawSubdivision(c, sub, kSubCx, kRowY + 6, CYAN);
+        drawSubdivision(c, sub, kSubCx, kRowY + 10, CYAN);
 
         // Key hint for the beats-per-bar rotation
         c.setFont(&fonts::Font0);
