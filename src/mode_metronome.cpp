@@ -20,6 +20,11 @@ namespace {
 constexpr uint32_t kEntryTimeoutMs = 3000;
 constexpr int kBeatRadius = 8;
 constexpr int kBeatSpacing = 40;  // distance between beat centres; 6 beats still fit in 240 px
+constexpr int kMargin = 6;        // left margin of the tempo number
+constexpr int kRowY = 38;         // vertical centre of the tempo / subdivision row
+constexpr int kSubCx = 198;       // horizontal centre of the subdivision figure
+// Four sixteenths span about x-17..x+18 around the centre; arrows sit 4 px outside that.
+constexpr int kSubArrowDx = 27;
 
 std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
@@ -31,6 +36,7 @@ std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
 // Draws the note figure for a subdivision (1 = quarter, 2 = two beamed
 // eighths, 3 = beamed triplet with a "3", 4 = four beamed sixteenths).
 // cx: horizontal centre, base: y of the note heads' centre.
+// Strokes are thin: 1 px stems, 2 px beams.
 void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
     constexpr int kStem = 14;
     constexpr int kSpacing[] = {0, 0, 14, 14, 9};
@@ -41,13 +47,13 @@ void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
     for (int i = 0; i < n; ++i) {
         const int hx = x0 + i * kSpacing[sub];
         c.fillEllipse(hx, base, 4, 3, col);
-        c.fillRect(hx + 3, base - kStem, 2, kStem, col);  // stem on the right of the head
+        c.fillRect(hx + 3, base - kStem, 1, kStem, col);  // stem on the right of the head
     }
     if (n > 1) {
         const int left = x0 + 3;
-        const int width = span + 2;
-        c.fillRect(left, base - kStem, width, 3, col);  // main beam
-        if (sub == 4) c.fillRect(left, base - kStem + 5, width, 3, col);  // second beam
+        const int width = span + 1;
+        c.fillRect(left, base - kStem, width, 2, col);  // main beam
+        if (sub == 4) c.fillRect(left, base - kStem + 4, width, 2, col);  // second beam
     }
     if (sub == 3) {
         c.setFont(&fonts::Font0);
@@ -188,24 +194,23 @@ public:
         const bool running = gRunning.load();
 
         c.fillSprite(BLACK);
-        c.setFont(&fonts::Font0);
         c.setTextSize(1);
-        c.setTextDatum(top_left);
-        c.setTextColor(DARKGREY);
-        c.drawString("Metronome", 4, 3);
 
-        // Tempo: number centred, "BPM" as a subscript at its bottom right
+        // Tempo on the left: the number is centred in a slot as wide as three digits
+        // (so 3-digit values touch the left margin), "BPM" as a subscript at its bottom right.
         const bool typing = entry_.length() > 0;
         const String tempo = typing ? entry_ : String(s.bpm);
         c.setFont(&fonts::Font7);
+        const int slotW = c.textWidth("000");
+        const int numCx = kMargin + slotW / 2;
         c.setTextDatum(middle_center);
         c.setTextColor(typing ? YELLOW : WHITE);
-        c.drawString(tempo, 120, 38);
+        c.drawString(tempo, numCx, kRowY);
         const int numberW = c.textWidth(tempo);
 
         // Up/Down arrows sit to the left of "BPM" (same cue as the tuner's reference A)
         const uint16_t bpmCol = typing ? YELLOW : LIGHTGREY;
-        const int bpmX = 120 + numberW / 2 + 18;
+        const int bpmX = numCx + numberW / 2 + 18;
         c.setFont(&fonts::Font2);
         c.setTextDatum(bottom_left);
         c.setTextColor(bpmCol);
@@ -228,13 +233,15 @@ public:
             }
         }
 
-        // Subdivision: note figure between < >
+        // Subdivision on the same row as the tempo: note figure between < >. The arrows stay
+        // at fixed distances (set by the widest figure, four sixteenths) and an arrow is
+        // hidden when its key cannot go any further.
         c.setFont(&fonts::Font2);
         c.setTextDatum(middle_center);
         c.setTextColor(CYAN);
-        c.drawString("<", 70, 112);
-        c.drawString(">", 170, 112);
-        drawSubdivision(c, sub, 120, 119, CYAN);
+        if (sub > 1) c.drawString("<", kSubCx - kSubArrowDx, kRowY + 2);
+        if (sub < 4) c.drawString(">", kSubCx + kSubArrowDx, kRowY + 2);
+        drawSubdivision(c, sub, kSubCx, kRowY + 6, CYAN);
 
         // Key hint for the beats-per-bar rotation
         c.setFont(&fonts::Font0);
