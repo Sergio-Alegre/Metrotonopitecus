@@ -38,4 +38,8 @@ public:
     // Draws into the content canvas if needed (or if force is set).
     // Returns true when the canvas changed and must be pushed to the screen.
     virtual bool draw(M5Canvas& canvas, bool force) = 0;
+
+    // Called right after the canvas was pushed to the screen (and the transfer finished).
+    // Lets a mode fire something at the same instant the new frame becomes visible.
+    virtual void afterPush() {}
 };

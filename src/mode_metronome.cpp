@@ -21,6 +21,8 @@ constexpr uint32_t kEntryTimeoutMs = 3000;
 constexpr int kBeatRadius = 8;
 constexpr int kBeatSpacing = 26;  // distance between beat centres; 6 beats end at x=152
 constexpr int kMargin = 6;        // left margin of the tempo number and of the beats
+constexpr int kFlashMinMs = 30;   // LED flash length limits (see afterPush())
+constexpr int kFlashMaxMs = 80;
 // Bottom row: beats from the left, "B: beats" hint at the right. The circles' bottom
 // (centre + 8 = row 120) leaves 4 free rows above the 125 px content area's end, and the
 // hint's text sits on that same bottom line.
@@ -42,6 +44,7 @@ std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
 std::atomic<int> gSub{1};
 std::atomic<int> gBeats{4};
+std::atomic<uint32_t> gClickUs{0};  // esp_timer time (low 32 bits, us) of the last click
 std::atomic<uint32_t> gSeq{0};  // clicks fired since boot
 std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
 
@@ -149,6 +152,7 @@ void engineTask(void*) {
         const int ticksPerBar = gBeats.load() * sub;
         if (idx >= ticksPerBar) idx = 0;  // subdivision changed mid-bar
         fireClick(idx, sub);
+        gClickUs.store((uint32_t)esp_timer_get_time());
         gTickIdx.store(idx);
         gSeq.fetch_add(1);
         idx = (idx + 1) % ticksPerBar;
@@ -175,11 +179,17 @@ public:
         entry_ = "";
         lastSeq_ = gSeq.load();
         dirty_ = true;
+
+        M5.Led.setBrightness(255);  // full brightness: the flash is a reference when the click is hard to hear
+        Serial.printf("[led] RGB LED %s\n", M5.Led.isEnabled() ? "available" : "NOT available");
+        ledOff();
     }
 
     void leave() override {
         gRunning.store(false);
         entry_ = "";
+        flashPending_ = false;
+        ledOff();
     }
 
     void onKey(const KeyEvent& e) override {
@@ -220,6 +230,13 @@ public:
                 commitEntry();
                 gRunning.store(!gRunning.load());
                 Serial.printf("[metro] %s at %d BPM\n", gRunning.load() ? "start" : "stop", settings::get().bpm);
+                if (gRunning.load()) {
+                    lagCount_ = 0;
+                } else {
+                    flashPending_ = false;
+                    ledOff();
+                    reportLag();
+                }
                 break;
         }
         dirty_ = true;
@@ -234,7 +251,42 @@ public:
         if (seq != lastSeq_) {
             lastSeq_ = seq;
             dirty_ = true;
+            // A beat (not a subdivision click) arms the LED; it fires in afterPush(), i.e.
+            // when the frame with the lit circle reaches the screen.
+            const int idx = gTickIdx.load();
+            if (gRunning.load() && idx % gSub.load() == 0) {
+                flashPending_ = true;
+                flashAccent_ = (idx == 0);
+            }
         }
+        if (ledOn_ && (int32_t)(millis() - ledOffAt_) >= 0) ledOff();
+    }
+
+    // Flash the RGB LED at the instant the new frame is on screen: red on the bar accent,
+    // green on the other beats, same colours as the circles. The flash lasts 1/5 of the beat,
+    // limited to 30..80 ms, so it is a constant 80 ms up to 150 BPM and shrinks for fast
+    // tempos (66 ms at 180, 54 at 220, 40 at 300).
+    void afterPush() override {
+        if (!flashPending_) return;
+        flashPending_ = false;
+        if (!M5.Led.isEnabled()) return;
+
+        const int beatMs = 60000 / gBpm.load();
+        const int flashMs = constrain(beatMs / 5, kFlashMinMs, kFlashMaxMs);
+        if (flashAccent_) {
+            M5.Led.setAllColor(255, 0, 0);
+        } else {
+            M5.Led.setAllColor(0, 255, 0);
+        }
+        ledOn_ = true;
+        ledOffAt_ = millis() + flashMs;
+
+        // Delay between the click and the LED (= the screen's own delay), for the serial report
+        const uint32_t lagUs = (uint32_t)esp_timer_get_time() - gClickUs.load();
+        lagSumUs_ += lagUs;
+        if (lagCount_ == 0 || lagUs < lagMinUs_) lagMinUs_ = lagUs;
+        if (lagUs > lagMaxUs_ || lagCount_ == 0) lagMaxUs_ = lagUs;
+        ++lagCount_;
     }
 
     bool draw(M5Canvas& c, bool force) override {
@@ -299,6 +351,19 @@ public:
     }
 
 private:
+    void ledOff() {
+        ledOn_ = false;
+        if (M5.Led.isEnabled()) M5.Led.setAllColor(0, 0, 0);
+    }
+
+    void reportLag() {
+        if (!lagCount_) return;
+        Serial.printf("[led] %u flashes, delay after click: avg %.1f ms, min %.1f, max %.1f\n", (unsigned)lagCount_,
+                      lagSumUs_ / 1000.0f / lagCount_, lagMinUs_ / 1000.0f, lagMaxUs_ / 1000.0f);
+        lagSumUs_ = 0;
+        lagCount_ = 0;
+    }
+
     void commitEntry() {
         if (!entry_.length()) return;
         setBpm(entry_.toInt());
@@ -331,6 +396,15 @@ private:
     uint32_t entryAt_ = 0;
     uint32_t lastSeq_ = 0;
     bool dirty_ = true;
+
+    bool flashPending_ = false;
+    bool flashAccent_ = false;
+    bool ledOn_ = false;
+    uint32_t ledOffAt_ = 0;
+    uint64_t lagSumUs_ = 0;
+    uint32_t lagMinUs_ = 0;
+    uint32_t lagMaxUs_ = 0;
+    uint32_t lagCount_ = 0;
 };
 
 }  // namespace

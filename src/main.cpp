@@ -116,7 +116,11 @@ void loop() {
     settings::tick();
     audio::update();
     current->update();
-    if (current->draw(canvas, forceRedraw)) canvas.pushSprite(0, 0);
+    if (current->draw(canvas, forceRedraw)) {
+        canvas.pushSprite(0, 0);
+        M5Cardputer.Display.waitDisplay();  // frame fully transferred
+        current->afterPush();
+    }
     forceRedraw = false;
 
     delay(4);
