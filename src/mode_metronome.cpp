@@ -19,7 +19,7 @@
 
 namespace {
 
-constexpr uint32_t kEntryTimeoutMs = 3000;
+constexpr uint32_t kEntryTimeoutMs = 2400;  // pause that confirms a typed BPM (was 3000)
 constexpr int kBeatRadius = 8;
 constexpr int kBeatSpacing = 26;  // distance between beat centres; 6 beats end at x=152
 constexpr int kMargin = 6;        // left margin of the tempo number and of the beats

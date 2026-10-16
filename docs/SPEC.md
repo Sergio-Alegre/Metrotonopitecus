@@ -43,7 +43,7 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
 ### Metrónomo (genérico, a moldear)
 
 - Dígitos: teclean BPM (Del borra; se confirma con Espacio, con cualquier otra tecla, al 3.º dígito o tras
-  una pausa de 3 s). Arriba/abajo: BPM ±1 (mantener = repetición).
+  una pausa de 2,4 s). Arriba/abajo: BPM ±1 (mantener = repetición).
 - `Enter`: tap tempo, pensado para la mano derecha (con Espacio y los cursores). El BPM es la media de los
   últimos 5 toques (4 intervalos); tras 2 s sin tocar, el siguiente toque empieza una serie nueva. El primer
   toque solo marca el tiempo. Mientras dura la serie el número va en amarillo. Si había un número a medias,
