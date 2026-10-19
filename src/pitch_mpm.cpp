@@ -12,6 +12,12 @@ namespace mpm {
 
 namespace {
 constexpr float kClarityThreshold = 0.9f;  // pitchy's K
+// Deviation from pitchy: when the K=0.9 candidate lies below kLowFreqHz, choose again with the stricter kLowK.
+// The built-in mic loses the fundamental of low strings (viola C3..F3), so the first peak (the octave above)
+// often reaches 0.9 of the true-period peak. Measured on recorded viola audio: K=0.97 below 400 Hz fixes
+// F3/E3/D3/C3 octave-up errors and changes nothing above 400 Hz (see docs/TONEMAP_DESIGN.md section 12).
+constexpr float kLowK = 0.97f;
+constexpr float kLowFreqHz = 400.0f;
 }
 
 Levels prepare(const int16_t* x, size_t n, float* work) {
@@ -145,6 +151,15 @@ Result findPitch(const float* w, size_t nSize, float sampleRate, int maxLag, flo
         if (nsdf[keys[k]] >= threshold) {
             idx = keys[k];
             break;
+        }
+    }
+    if (sampleRate / (float)idx < kLowFreqHz) {
+        const float lowThreshold = kLowK * nMax;
+        for (int k = 0; k < keyCount; ++k) {
+            if (nsdf[keys[k]] >= lowThreshold) {
+                idx = keys[k];
+                break;
+            }
         }
     }
 

@@ -474,7 +474,7 @@ Cada cambio llama a `settings::touch()`. Mensajes de 1,5 s (`Sensitivity: Hard`,
 `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`, `LED: off`, `Map cleared`). En pausa
 la franja muestra `Paused (Space)` fijo.
 
-**Tabla de puerta (inicial, a calibrar en la PARADA A):** `kGateRms = {0, 120, 300, 800}`, `kMinClarity = 0.8`.
+**Tabla de puerta (calibrada en la PARADA A, ver §12):** `kGateRms = {0, 80, 200, 450}`, `kMinClarity = 0.8`. (Valor inicial del diseño: `{0, 120, 300, 800}`.)
 La comprobación de energía es `sumSq > 0` (equivale a `rms>1e-7 || peak>4e-6` de ToneMap en unidades int16).
 
 ## 8. TONEMAP_BENCH y TONEMAP_DEBUG
@@ -639,3 +639,29 @@ registros del sistema (`E (...)`) salen aunque no se abra.
   es true hasta `hold + 10 s + 600 ms`; `fadeAnchor` queda sin uso; la frecuencia→nota rechaza el frame si el mejor
   candidato queda a más de 100 c; `-I${PROJECT_DIR}/test` pasó a `-Itest` (la ruta con `${PROJECT_DIR}` se rompía en Windows).
 - `Model` tiene constructor vacío para que viva en `.bss`; nunca crearlo en la pila.
+
+### PARADA A: calibración con viola (2026-10-19, micro del Cardputer a ~30 cm)
+
+Método: el bench vuelca el audio crudo (tecla `w`, 32 kHz, trozos de 1024 muestras en base64, 135 s sin huecos) y se
+repite el detector offline en Python (`mpm_off.py`, misma NSDF y máquina de máximos que el C++) con distintos parámetros.
+
+- **Niveles (rms int16, ventanas de 2048):** silencio mediana 5, máx. 12; voz hablando mediana 26, p99 79, máx. 86
+  (en un primer test más fuerte hubo picos de voz de 640); viola mediana 190, p90 509, máx. 1043. Las notas agudas
+  (C6–C7) y los pianos salen a rms 90–200.
+- **Puerta de ruido:** con claridad > 0,8, la voz cuela 105/233 frames sin puerta, 18/233 con 60, 3/233 con 80 y
+  0/233 con 120; el silencio nunca. Frames válidos de viola que se conservan: 100 % sin puerta, 88 % con 80,
+  81 % con 120, 76 % con 150, 37 % con 300. **Tabla elegida: None 0, Low 80 (defecto), Med 200, High 450.**
+- **Claridad:** subir de 0,8 a 0,9 pierde ~4 % de frames válidos de viola y no aporta nada con la puerta puesta →
+  **se mantiene 0,8** (valor de ToneMap).
+- **Errores de octava en graves (viola):** el micro pierde el fundamental de las cuerdas graves. Con K=0,9 (pitchy):
+  F3 sale como F4 (claridad 0,95), y en el pizzicato E3/D3/C3 salen como E4/D4/C4; en la primera captura en vivo
+  también hubo C2/G2 y alternancias D3/D4 al afinar. Barrido de K sobre la grabación: K = 0,8–0,9 igual; K = 0,95
+  arregla F3 solo al 28 %; K = 0,97 al 88 %; K = 1,0 es caótico (G2, A#1…). K = 0,97 aplicado a todo el rango
+  estropea unos 17 frames agudos (A6→A5, F6→F5, E6→E5).
+  **Decisión: K híbrido** — K = 0,9 y, si el candidato queda por debajo de 400 Hz, se vuelve a elegir con K = 0,97
+  (`kLowK`, `kLowFreqHz` en `pitch_mpm.cpp`). Sobre la grabación solo cambia frames graves y todos los cambios son
+  correcciones (F4→F3 ×138, E4→E3 ×14, D4→D3 ×11, C4→C3 ×2); los agudos no se tocan. Es una **desviación de pitchy**.
+  Regresión del bench sintético a 32 kHz: idéntica a la anterior.
+- **Cuerdas al aire (K híbrido):** C3 +4 c, G3 +3 c, D4 +9 c, A4 +7 c respecto a A=440 (A=442 ≈ +8 c): afinación
+  estable, desviaciones de ±1–2 c durante la nota sostenida (claridad 1,00).
+- Pendiente: confirmarlo en vivo con la vista ToneMap (PARADA B) y, si hace falta, otro valor de `kLowFreqHz` para flauta.
