@@ -16,6 +16,7 @@
 #include "modes.h"
 #include "pitch.h"
 #include "settings.h"
+#include "tonemap_view.h"
 
 namespace {
 
@@ -82,23 +83,50 @@ public:
     char hotkey() const override { return 't'; }
     const char* label() const override { return "Tuner"; }
 
+    // The tuner has two views: the classic needle and the ToneMap heat map (tonemap_view.cpp).
+    // The last one used is persisted (settings tunerView) and opened on entry.
     void enter() override {
-        micOk_ = audio::micStart();
-        pending_ = false;
-        hasReading_ = false;
-        needleDeg_ = kRestDeg;
-        targetDeg_ = kRestDeg;
-        lastUpdateMs_ = millis();
-        dirty_ = true;
+        tm_ = settings::get().tunerView == 1;
+        if (tm_) {
+            tonemap::enter();
+        } else {
+            enterClassic();
+        }
     }
 
     void leave() override {
-        audio::droneStop();
-        audio::micStop();
-        pending_ = false;
+        if (tm_) {
+            tonemap::leave();
+        } else {
+            leaveClassic();
+        }
+    }
+
+    // T pressed while the tuner is already active: switch view.
+    void onReselect() override {
+        auto& s = settings::get();
+        if (tm_) {
+            tonemap::leave();
+            tm_ = false;
+            s.tunerView = 0;
+            settings::touch();
+            enterClassic();
+        } else {
+            leaveClassic();
+            tm_ = true;
+            s.tunerView = 1;
+            settings::touch();
+            tonemap::enter();
+        }
+        dirty_ = true;
+    }
+
+    void afterPush() override {
+        if (tm_) tonemap::afterPush();
     }
 
     void onKey(const KeyEvent& e) override {
+        if (tm_) return tonemap::onKey(e);
         auto& s = settings::get();
         switch (e.key) {
             case Key::Left:
@@ -137,6 +165,7 @@ public:
     }
 
     void update() override {
+        if (tm_) return tonemap::update();
         const uint32_t now = millis();
         pollMic(now);
 #ifdef TUNER_DEBUG
@@ -159,6 +188,7 @@ public:
     }
 
     bool draw(M5Canvas& c, bool force) override {
+        if (tm_) return tonemap::draw(c, force);
         const uint32_t now = millis();
         if (!force && (!dirty_ || now - lastDrawMs_ < 30)) return false;
         dirty_ = false;
@@ -254,6 +284,22 @@ public:
     }
 
 private:
+    void enterClassic() {
+        micOk_ = audio::micStart();
+        pending_ = false;
+        hasReading_ = false;
+        needleDeg_ = kRestDeg;
+        targetDeg_ = kRestDeg;
+        lastUpdateMs_ = millis();
+        dirty_ = true;
+    }
+
+    void leaveClassic() {
+        audio::droneStop();
+        audio::micStop();
+        pending_ = false;
+    }
+
     void targetChanged() {
         settings::touch();
         hasReading_ = false;
@@ -348,6 +394,7 @@ private:
         }
     }
 
+    bool tm_ = false;  // ToneMap view active
     bool micOk_ = false;
     bool pending_ = false;
     bool hasReading_ = false;

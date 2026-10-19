@@ -42,4 +42,7 @@ public:
     // Called right after the canvas was pushed to the screen (and the transfer finished).
     // Lets a mode fire something at the same instant the new frame becomes visible.
     virtual void afterPush() {}
+
+    // Called when the mode's own hotkey is pressed while it is already active.
+    virtual void onReselect() {}
 };

@@ -82,7 +82,9 @@ void handleKey(const KeyEvent& e) {
         if (e.ch == '-' || e.ch == '_') return changeVolume(-1);
         if (e.ch == '=' || e.ch == '+') return changeVolume(+1);
         for (Mode* m : modes) {
-            if (m->hotkey() == e.ch) return switchTo(m);
+            if (m->hotkey() != e.ch) continue;
+            if (m == current) return current->onReselect();
+            return switchTo(m);
         }
     }
     current->onKey(e);
