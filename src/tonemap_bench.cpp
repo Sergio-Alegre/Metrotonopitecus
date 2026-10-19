@@ -1225,6 +1225,28 @@ void printHeader() {
     rep("[bench] keys: d=toggle draw load, r=reprint report, a=reprint synthetic cases");
 }
 
+// Raw audio streaming ('w' key): each new 1024-sample chunk (the newest half of the live window) is sent as one
+// base64 line "[raw] seq=N <b64 of 2048 bytes, little-endian int16>", so a PC can record it and replay detector
+// variants offline. Analysis is skipped while streaming so no chunk is lost.
+bool rawOn = false;
+
+void emitRaw(uint32_t seq) {
+    static const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    static char line[2800];
+    const uint8_t* b = reinterpret_cast<const uint8_t*>(sig + 1024);
+    const size_t n = 2048;
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        const uint32_t v = ((uint32_t)b[i] << 16) | ((uint32_t)b[i + 1] << 8) | (i + 2 < n ? b[i + 2] : 0);
+        line[o++] = kB64[(v >> 18) & 63];
+        line[o++] = kB64[(v >> 12) & 63];
+        line[o++] = (i + 1 < n) ? kB64[(v >> 6) & 63] : '=';
+        line[o++] = (i + 2 < n) ? kB64[v & 63] : '=';
+    }
+    line[o] = 0;
+    Serial.printf("[raw] seq=%u %s\n", (unsigned)seq, line);
+}
+
 void handleSerial() {
     while (Serial.available() > 0) {
         const int ch = Serial.read();
@@ -1238,6 +1260,10 @@ void handleSerial() {
             reprintReport();
         } else if (ch == 'a' || ch == 'A') {
             reprintCases();
+        } else if (ch == 'w' || ch == 'W') {
+            rawOn = !rawOn;
+            Serial.printf("[raw] streaming %s fs=%u chunk=1024\n", rawOn ? "ON" : "OFF",
+                          (unsigned)tonemap_audio::kSampleRate);
         }
     }
 }
@@ -1362,7 +1388,10 @@ void loop() {
     if (liveRunning) {
         tonemap_audio::service();
         tonemap_audio::WindowInfo wi;
-        if (tonemap_audio::takeWindow(sig, wi)) analyse();
+        if (tonemap_audio::takeWindow(sig, wi)) {
+            if (rawOn) emitRaw(wi.seq);
+            else analyse();
+        }
     }
 
     if (drawOn && now - lastDrawMs >= 50) {
