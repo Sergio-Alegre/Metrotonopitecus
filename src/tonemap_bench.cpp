@@ -288,11 +288,14 @@ void runTiming() {
 //            Medium: dz 0.0021, scale 0.7, span 2; Hard: 0.00105, 0.9, 4; Relaxed: 0.0025, 0.7, 2
 //            (tonemap.live has span 4 / 4 / 8: narrowed on purpose, device feedback 2026-10-22).
 //            Pure centre up to cents(dz/scale) = 6.17 (Relaxed), 5.19 (Medium), 2.02 (Hard);
-//            saturated from cents(dz*(1+span)/scale) = 18.45, 15.51, 10.07.
+//            saturated from cents(dz*(1+span)/scale) = 18.45, 15.51, 10.07 (Safe). Extreme saturates at |t| = 0.3:
+//            cents(dz*(1+0.3*span)/scale) = 9.87 (Relaxed), 8.29 (Medium), 4.44 (Hard); yellow / cyan at |t| = 0.15.
 //   palette  t in [-1,+1] -> colour. Safe (0): t >= 0 (200,255,200) + ((255,110,0)-(200,255,200))*t,
-//            t < 0 (200,255,200) + ((0,100,255)-(200,255,200))*|t|. Classic (1): green (0,255,0) ->
-//            yellow (255,255,0) -> red (255,0,0) with the stops at |t| = 0, 0.5, 1; low side via cyan
-//            (0,255,255) to blue (0,0,255). The cell shows round(colour * display intensity).
+//            t < 0 (200,255,200) + ((0,100,255)-(200,255,200))*|t|. Extreme (1): the tendency is first
+//            remapped t_e = sign(t)*clamp(|t|/0.3, 0, 1) (steep ramp: fully saturated from |t| = 0.3), then green
+//            (0,255,0) -> yellow (255,255,0) -> red (255,0,0) with the stops at |t_e| = 0, 0.5, 1; low side via cyan
+//            (0,255,255) to blue (0,0,255). The cell shows round(colour * display intensity); for Extreme the
+//            intensity is 0.75 + 0.25 * display (never dimmer than 0.75 once stained).
 //   label    black text when 0.2126*R + 0.7152*G + 0.0722*B > 127.5 (0.5 of 255), else white.
 //   history  duration-weighted mean of errRatio over the last H ms of voiced time (the segment on
 //            the window edge enters fractionally), converted back to cents with 1200*log2(1+e).
@@ -459,7 +462,8 @@ struct ColorCase {
     uint8_t r, g, b;
 };
 // Expected from the bias and palette formulas above (Python, double precision, closed form), display
-// intensity 1. Palette 0 = Safe, 1 = Classic. Ramp: Medium pure centre up to 5.19 c, full colour from 15.51 c.
+// intensity 1. Palette 0 = Safe, 1 = Extreme. Safe ramp: Medium pure centre up to 5.19 c, full colour from 15.51 c.
+// Extreme ramp: Medium pure green up to 5.19 c, fully red / blue from 8.29 c (Relaxed 6.17 / 9.87, Hard 2.02 / 4.44).
 const ColorCase kColorCases[] = {
     // ---- Safe
     {0, Sensitivity::Medium, 0.0f, 200, 255, 200},   {0, Sensitivity::Medium, 5.0f, 200, 255, 200},
@@ -482,29 +486,35 @@ const ColorCase kColorCases[] = {
     {0, Sensitivity::Relaxed, 19.0f, 255, 110, 0},   {0, Sensitivity::Relaxed, 40.0f, 255, 110, 0},
     {0, Sensitivity::Relaxed, -10.0f, 139, 208, 217}, {0, Sensitivity::Relaxed, -14.0f, 74, 158, 235},
     {0, Sensitivity::Relaxed, -40.0f, 0, 100, 255},
-    // ---- Classic
+    // ---- Extreme
     {1, Sensitivity::Medium, 0.0f, 0, 255, 0},       {1, Sensitivity::Medium, 5.0f, 0, 255, 0},
-    {1, Sensitivity::Medium, 8.0f, 139, 255, 0},     {1, Sensitivity::Medium, 10.4f, 255, 253, 0},
-    {1, Sensitivity::Medium, 12.0f, 255, 174, 0},    {1, Sensitivity::Medium, 15.0f, 255, 25, 0},
-    {1, Sensitivity::Medium, 16.0f, 255, 0, 0},      {1, Sensitivity::Medium, 40.0f, 255, 0, 0},
-    {1, Sensitivity::Medium, -8.0f, 0, 255, 137},    {1, Sensitivity::Medium, -10.0f, 0, 255, 235},
-    {1, Sensitivity::Medium, -12.0f, 0, 178, 255},   {1, Sensitivity::Medium, -16.0f, 0, 0, 255},
+    {1, Sensitivity::Medium, 6.0f, 134, 255, 0},     {1, Sensitivity::Medium, 7.0f, 255, 212, 0},
+    {1, Sensitivity::Medium, 8.0f, 255, 48, 0},      {1, Sensitivity::Medium, 9.0f, 255, 0, 0},
+    {1, Sensitivity::Medium, 12.0f, 255, 0, 0},      {1, Sensitivity::Medium, 40.0f, 255, 0, 0},
+    {1, Sensitivity::Medium, -6.0f, 0, 255, 130},    {1, Sensitivity::Medium, -7.0f, 0, 217, 255},
+    {1, Sensitivity::Medium, -8.0f, 0, 54, 255},     {1, Sensitivity::Medium, -9.0f, 0, 0, 255},
     {1, Sensitivity::Medium, -40.0f, 0, 0, 255},
-    {1, Sensitivity::Hard, 0.0f, 0, 255, 0},         {1, Sensitivity::Hard, 6.0f, 252, 255, 0},
-    {1, Sensitivity::Hard, 8.0f, 255, 131, 0},       {1, Sensitivity::Hard, 10.5f, 255, 0, 0},
-    {1, Sensitivity::Hard, -6.0f, 0, 255, 251},      {1, Sensitivity::Hard, -10.5f, 0, 0, 255},
-    {1, Sensitivity::Relaxed, 0.0f, 0, 255, 0},      {1, Sensitivity::Relaxed, 10.0f, 159, 255, 0},
-    {1, Sensitivity::Relaxed, 14.0f, 255, 185, 0},   {1, Sensitivity::Relaxed, 19.0f, 255, 0, 0},
-    {1, Sensitivity::Relaxed, -10.0f, 0, 255, 156},  {1, Sensitivity::Relaxed, -14.0f, 0, 190, 255},
-    {1, Sensitivity::Relaxed, -40.0f, 0, 0, 255},
+    {1, Sensitivity::Hard, 0.0f, 0, 255, 0},         {1, Sensitivity::Hard, 3.0f, 207, 255, 0},
+    {1, Sensitivity::Hard, 4.0f, 255, 92, 0},        {1, Sensitivity::Hard, 5.0f, 255, 0, 0},
+    {1, Sensitivity::Hard, -3.0f, 0, 255, 206},      {1, Sensitivity::Hard, -5.0f, 0, 0, 255},
+    {1, Sensitivity::Relaxed, 0.0f, 0, 255, 0},      {1, Sensitivity::Relaxed, 8.0f, 252, 255, 0},
+    {1, Sensitivity::Relaxed, 9.0f, 255, 120, 0},    {1, Sensitivity::Relaxed, 11.0f, 255, 0, 0},
+    {1, Sensitivity::Relaxed, -8.0f, 0, 255, 247},   {1, Sensitivity::Relaxed, -9.0f, 0, 126, 255},
+    {1, Sensitivity::Relaxed, -11.0f, 0, 0, 255},
 };
-// Same notes with only 125 ms of voiced time: base = display = 0.5 (FULL_CONF 250), colour = round(colour*0.5).
+// Same notes with only 125 ms of voiced time: base = display = 0.5 (FULL_CONF 250), colour = round(colour*0.5)
+// for Safe and round(colour*0.875) for Extreme (intensity 0.75 + 0.25*0.5).
 const ColorCase kBlendCases[] = {
     {0, Sensitivity::Medium, 12.0f, 118, 80, 34}, {0, Sensitivity::Medium, -12.0f, 35, 77, 118},
     {0, Sensitivity::Hard, 6.0f, 114, 92, 51},    {0, Sensitivity::Medium, 0.0f, 100, 128, 100},
-    {1, Sensitivity::Medium, 12.0f, 128, 87, 0},  {1, Sensitivity::Hard, -6.0f, 0, 128, 125},
-    {1, Sensitivity::Medium, 0.0f, 0, 128, 0},
+    {1, Sensitivity::Medium, 12.0f, 223, 0, 0},   {1, Sensitivity::Hard, -6.0f, 0, 0, 223},
+    {1, Sensitivity::Medium, 0.0f, 0, 223, 0},    {1, Sensitivity::Medium, 7.0f, 223, 186, 0},
+    {1, Sensitivity::Hard, 4.0f, 223, 81, 0},
 };
+// The history is stored as 16-bit fixed point (1/65536 of an errRatio, about 0.013 c per half step), which Safe turns
+// into well under one colour level. The Extreme ramp is about 160-210 levels per cent in its transition, so the same
+// quantisation shows up as up to +-3 levels there: the expectations are the closed form, the tolerance is 4.
+int colorTol(int palette) { return palette == 1 ? 4 : 1; }
 const char* sensName(Sensitivity s) { return s == Sensitivity::Relaxed ? "Relaxed" : (s == Sensitivity::Medium ? "Medium" : "Hard"); }
 
 void testColor() {
@@ -515,7 +525,7 @@ void testColor() {
         feedNote(69, c.cents, 200, 20);  // 4 s: base 1, Relaxed display converged (1-e^-32)
         bool visited = false;
         const Rgb got = gModel.cellColor(69, gNow, &visited);
-        s.check(rgbNear(got, c.r, c.g, c.b, 1) && visited, "pal%d %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) visited=%d", c.palette,
+        s.check(rgbNear(got, c.r, c.g, c.b, colorTol(c.palette)) && visited, "pal%d %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) visited=%d", c.palette,
                 sensName(c.s), (double)c.cents, got.r, got.g, got.b, c.r, c.g, c.b, (int)visited);
     }
     for (const ColorCase& c : kBlendCases) {
@@ -524,7 +534,7 @@ void testColor() {
         feedNote(69, c.cents, 5, 25);  // 125 ms voiced
         const Rgb got = gModel.cellColor(69, gNow, nullptr);
         const float disp = gModel.displayIntensity(69, gNow);
-        s.check(rgbNear(got, c.r, c.g, c.b, 1) && fabsf(disp - 0.5f) < 0.001f, "blend pal%d %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) display %.4f",
+        s.check(rgbNear(got, c.r, c.g, c.b, colorTol(c.palette)) && fabsf(disp - 0.5f) < 0.001f, "blend pal%d %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) display %.4f",
                 c.palette, sensName(c.s), (double)c.cents, got.r, got.g, got.b, c.r, c.g, c.b, (double)disp);
     }
     gModel.setPalette(0);
@@ -538,14 +548,14 @@ void testColor() {
     s.check(rgbNear(biasColor(0, Sensitivity::Hard, -0.05f), 0, 100, 255, 0), "biasColor flat");
     s.check(rgbNear(biasColor(0, Sensitivity::Relaxed, NAN), 200, 255, 200, 0), "biasColor NaN -> centre");
     s.check(rgbNear(biasColor(1, Sensitivity::Medium, 0.05f), 255, 0, 0, 0) && rgbNear(biasColor(1, Sensitivity::Hard, -0.05f), 0, 0, 255, 0),
-            "biasColor Classic sharp / flat");
+            "biasColor Extreme sharp / flat");
     s.check(inDeadzone(Sensitivity::Medium, 0.0020f) && !inDeadzone(Sensitivity::Medium, 0.0022f), "deadzone Medium 0.21%%");
     s.check(inDeadzone(Sensitivity::Hard, 0.0010f) && !inDeadzone(Sensitivity::Hard, 0.0011f), "deadzone Hard 0.105%%");
     s.check(inDeadzone(Sensitivity::Relaxed, 0.0024f) && !inDeadzone(Sensitivity::Relaxed, 0.0026f), "deadzone Relaxed 0.25%%");
     s.check(!inDeadzone(Sensitivity::Medium, NAN), "deadzone NaN");
     s.check(baseIntensity(0) == 0.0f && fabsf(baseIntensity(125) - 0.5f) < 1e-6f && baseIntensity(250) == 1.0f && baseIntensity(99999) == 1.0f,
             "baseIntensity min(1, total/250)");
-    s.done("%u colour cases +-1 (Safe + Classic), %u blend cases at display 0.5", (unsigned)(sizeof(kColorCases) / sizeof(kColorCases[0])),
+    s.done("%u colour cases +-1 (Safe + Extreme), %u blend cases at display 0.5", (unsigned)(sizeof(kColorCases) / sizeof(kColorCases[0])),
            (unsigned)(sizeof(kBlendCases) / sizeof(kBlendCases[0])));
 }
 
@@ -555,14 +565,17 @@ struct PalCase {
     float t;
     uint8_t r, g, b;
 };
-// Exact: every t is a multiple of 0.25, so the float arithmetic is exact and the rounding (half away from
-// zero) can be checked with tolerance 0. Safe: centre (200,255,200) -> high (255,110,0) / low (0,100,255).
-// Classic: (0,255,0) -> (255,255,0) -> (255,0,0) and (0,255,0) -> (0,255,255) -> (0,0,255).
+// Exact: float arithmetic is exact enough that the rounding can be checked with tolerance 0 (no value sits on a
+// .5 tie). Safe: centre (200,255,200) -> high (255,110,0) / low (0,100,255), t multiples of 0.25.
+// Extreme: t_e = sign(t)*clamp(|t|/0.3, 0, 1), then (0,255,0) -> (255,255,0) -> (255,0,0) and
+// (0,255,0) -> (0,255,255) -> (0,0,255); the t used are multiples of 0.03, so t_e is a multiple of 0.1.
 const PalCase kPalCases[] = {
     {0, -1.0f, 0, 100, 255},   {0, -0.75f, 50, 139, 241}, {0, -0.5f, 100, 178, 228}, {0, -0.25f, 150, 216, 214}, {0, 0.0f, 200, 255, 200},
     {0, 0.25f, 214, 219, 150}, {0, 0.5f, 228, 183, 100},  {0, 0.75f, 241, 146, 50},  {0, 1.0f, 255, 110, 0},
-    {1, -1.0f, 0, 0, 255},     {1, -0.75f, 0, 128, 255},  {1, -0.5f, 0, 255, 255},   {1, -0.25f, 0, 255, 128},   {1, 0.0f, 0, 255, 0},
-    {1, 0.25f, 128, 255, 0},   {1, 0.5f, 255, 255, 0},    {1, 0.75f, 255, 128, 0},   {1, 1.0f, 255, 0, 0},
+    {1, -1.0f, 0, 0, 255},     {1, -0.5f, 0, 0, 255},     {1, -0.3f, 0, 0, 255},     {1, -0.24f, 0, 102, 255},   {1, -0.18f, 0, 204, 255},
+    {1, -0.15f, 0, 255, 255},  {1, -0.12f, 0, 255, 204},  {1, -0.06f, 0, 255, 102},  {1, -0.03f, 0, 255, 51},    {1, 0.0f, 0, 255, 0},
+    {1, 0.03f, 51, 255, 0},    {1, 0.06f, 102, 255, 0},   {1, 0.12f, 204, 255, 0},   {1, 0.15f, 255, 255, 0},    {1, 0.18f, 255, 204, 0},
+    {1, 0.24f, 255, 102, 0},   {1, 0.3f, 255, 0, 0},      {1, 0.5f, 255, 0, 0},      {1, 1.0f, 255, 0, 0},
 };
 struct LabelCase {
     Rgb c;
@@ -579,16 +592,16 @@ const LabelCase kLabelCases[] = {
     {{0, 100, 255}, false, "Safe low"},
     {{90, 115, 90}, false, "Safe centre faded to 0.45"},
     {{110, 140, 110}, true, "Safe centre at 0.55"},
-    {{0, 255, 0}, true, "Classic centre"},
-    {{255, 255, 0}, true, "Classic yellow"},
-    {{0, 255, 255}, true, "Classic cyan"},
-    {{255, 0, 0}, false, "Classic red"},
-    {{0, 0, 255}, false, "Classic blue"},
+    {{0, 255, 0}, true, "Extreme centre"},
+    {{255, 255, 0}, true, "Extreme yellow"},
+    {{0, 255, 255}, true, "Extreme cyan"},
+    {{255, 0, 0}, false, "Extreme red"},
+    {{0, 0, 255}, false, "Extreme blue"},
 };
 
 void testPalette() {
     Series s("palette/biasT/label");
-    // paletteColor at t = -1, -0.75, -0.5, -0.25, 0, +0.25, +0.5, +0.75, +1 for both palettes
+    // paletteColor at the tendencies of kPalCases (Safe -1..+1 in steps of 0.25, Extreme steep ramp) for both palettes
     for (const PalCase& c : kPalCases) {
         const Rgb got = paletteColor(c.palette, c.t);
         s.check(rgbNear(got, c.r, c.g, c.b, 0), "palette %d t=%+.2f got (%d,%d,%d) expected (%d,%d,%d)", c.palette, (double)c.t, got.r, got.g, got.b,
@@ -596,7 +609,7 @@ void testPalette() {
     }
     // clamping, NaN, unknown palette index
     s.check(rgbNear(paletteColor(0, 7.5f), 255, 110, 0, 0) && rgbNear(paletteColor(0, -7.5f), 0, 100, 255, 0), "Safe t clamps to +-1");
-    s.check(rgbNear(paletteColor(1, 7.5f), 255, 0, 0, 0) && rgbNear(paletteColor(1, -7.5f), 0, 0, 255, 0), "Classic t clamps to +-1");
+    s.check(rgbNear(paletteColor(1, 7.5f), 255, 0, 0, 0) && rgbNear(paletteColor(1, -7.5f), 0, 0, 255, 0), "Extreme t clamps to +-1");
     s.check(rgbNear(paletteColor(0, NAN), 200, 255, 200, 0) && rgbNear(paletteColor(1, NAN), 0, 255, 0, 0), "NaN t -> centre");
     s.check(rgbNear(paletteColor(9, 1.0f), 255, 110, 0, 0) && rgbNear(paletteColor(-1, -1.0f), 0, 100, 255, 0), "unknown palette index -> Safe");
     // greyscale / protanopia argument for Safe: luminance strictly decreasing from the centre to either end
@@ -642,6 +655,24 @@ void testPalette() {
         }
     }
 
+    // Extreme thresholds in cents: pure green up to the dead zone, then the steep ramp (yellow / cyan at |t| = 0.15,
+    // fully red / blue from |t| = 0.3): Relaxed 6.17 / 9.87, Medium 5.19 / 8.29, Hard 2.02 / 4.44
+    {
+        const double pure[3] = {6.172, 5.186, 2.019}, full[3] = {9.865, 8.290, 4.438}, yel[3] = {8.019, 6.739, 3.229};
+        for (int i = 0; i < 3; ++i) {
+            const Sensitivity sv = (Sensitivity)i;
+            const Rgb a = biasColor(1, sv, (float)ratioOf(pure[i] - 0.02)), a2 = biasColor(1, sv, (float)ratioOf(pure[i] + 0.02));
+            s.check(rgbNear(a, 0, 255, 0, 0) && a2.r > 0 && a2.r < 10 && a2.g == 255 && a2.b == 0, "Extreme %s starts at %.2f c: (%d,%d,%d) / (%d,%d,%d)",
+                    sensName(sv), pure[i], a.r, a.g, a.b, a2.r, a2.g, a2.b);
+            const Rgb y = biasColor(1, sv, (float)ratioOf(yel[i]));
+            s.check(y.r >= 253 && y.g == 255 && y.b == 0, "Extreme %s yellow at %.2f c: (%d,%d,%d)", sensName(sv), yel[i], y.r, y.g, y.b);
+            const Rgb f1 = biasColor(1, sv, (float)ratioOf(full[i] - 0.02)), f2 = biasColor(1, sv, (float)ratioOf(full[i] + 0.02));
+            const Rgb n2 = biasColor(1, sv, (float)ratioOf(-(full[i] + 0.3)));
+            s.check(f1.r == 255 && f1.g > 0 && f1.g < 10 && f1.b == 0 && rgbNear(f2, 255, 0, 0, 0) && rgbNear(n2, 0, 0, 255, 0),
+                    "Extreme %s saturates at %.2f c: (%d,%d,%d) / (%d,%d,%d)", sensName(sv), full[i], f1.r, f1.g, f1.b, f2.r, f2.g, f2.b);
+        }
+    }
+
     // label colour rule: black text above 0.5 relative luminance, white below
     s.check(relLuminance(Rgb{0, 0, 0}) == 0.0f && fabsf(relLuminance(Rgb{255, 255, 255}) - 1.0f) < 1e-5f && fabsf(relLuminance(Rgb{255, 0, 0}) - 0.2126f) < 1e-5f &&
                 fabsf(relLuminance(Rgb{0, 255, 0}) - 0.7152f) < 1e-5f && fabsf(relLuminance(Rgb{0, 0, 255}) - 0.0722f) < 1e-5f,
@@ -655,7 +686,7 @@ void testPalette() {
     s.check(gModel.palette() == 0, "fresh() leaves palette 0");
     s.check(rgbNear(gModel.cellColor(69, t0, nullptr), 236, 159, 68, 1), "Safe +12 c Medium");
     gModel.setPalette(1);
-    s.check(gModel.palette() == 1 && rgbNear(gModel.cellColor(69, t0, nullptr), 255, 174, 0, 1), "Classic +12 c Medium");
+    s.check(gModel.palette() == 1 && rgbNear(gModel.cellColor(69, t0, nullptr), 255, 0, 0, 1), "Extreme +12 c Medium (saturated red)");
     gModel.setPalette(5);
     s.check(gModel.palette() == 1, "setPalette(5) clamps to 1");
     gModel.setPalette(-4);
@@ -666,12 +697,37 @@ void testPalette() {
     s.check(rgbNear(gModel.cellColor(69, t0 + 7500, nullptr), 204, 137, 59, 1), "Safe at 0.8625");
     gModel.setPalette(1);
     s.check(gModel.displayIntensity(69, t0 + 7500) == d1, "setPalette keeps the display intensity");
-    s.check(rgbNear(gModel.cellColor(69, t0 + 7500, nullptr), 220, 150, 0, 1), "Classic at 0.8625");
+    s.check(rgbNear(gModel.cellColor(69, t0 + 7500, nullptr), 246, 0, 0, 1), "Extreme at display 0.8625: round(0.965625*(255,0,0))");
     s.check(fabsf(gModel.displayIntensity(69, t0 + 15000) - 0.45f) < 1e-4f, "setPalette did not restart the fade timer: +15 s = %.4f",
             (double)gModel.displayIntensity(69, t0 + 15000));
-    s.check(rgbNear(gModel.cellColor(69, t0 + 20000, nullptr), 115, 78, 0, 1), "Classic faded to 0.45: round(0.45*(255,174,0))");
+    s.check(rgbNear(gModel.cellColor(69, t0 + 20000, nullptr), 220, 0, 0, 1), "Extreme faded to 0.45: round(0.8625*(255,0,0))");
     gModel.setPalette(0);
     s.check(rgbNear(gModel.cellColor(69, t0 + 20000, nullptr), 106, 72, 31, 1), "Safe faded to 0.45: round(0.45*(236,159,68))");
+    // Extreme intensity rule: 0.75 + 0.25 * display. 25 ms voiced = display 0.1 -> 0.775 of the colour (green 198),
+    // where Safe shows 0.1 of it; a visited but never stained cell stays black.
+    fresh(Sensitivity::Medium, 1, 5);
+    gModel.setPalette(1);
+    feedNote(69, 0.0, 1, 25);
+    {
+        bool visited = false;
+        const Rgb g = gModel.cellColor(69, gNow, &visited);
+        const float d = gModel.displayIntensity(69, gNow);
+        s.check(fabsf(d - 0.1f) < 1e-4f && rgbNear(g, 0, 198, 0, 1) && visited, "Extreme at display 0.1 -> (0,198,0) got (%d,%d,%d), display %.4f", g.r, g.g, g.b,
+                (double)d);
+        gModel.setPalette(0);
+        const Rgb safe = gModel.cellColor(69, gNow, nullptr);
+        s.check(rgbNear(safe, 20, 26, 20, 1), "Safe at display 0.1 keeps the plain intensity: got (%d,%d,%d)", safe.r, safe.g, safe.b);
+        gModel.setPalette(1);
+    }
+    fresh(Sensitivity::Medium, 1, 5);
+    gModel.setPalette(1);
+    frame(69, 12.0, 32, 440.0);  // first frame of a note: visited, no history yet
+    {
+        bool visited = false;
+        const Rgb none = gModel.cellColor(69, gNow, &visited);
+        s.check(none.r == 0 && none.g == 0 && none.b == 0 && visited, "Extreme visited but never stained stays black: got (%d,%d,%d) visited=%d", none.r,
+                none.g, none.b, (int)visited);
+    }
     // reset() keeps the palette like the other settings
     gModel.setPalette(1);
     gModel.reset(gNow);

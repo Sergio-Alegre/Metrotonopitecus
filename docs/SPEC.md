@@ -70,13 +70,25 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
 
 ### Afinador
 
+- **Detección automática de la nota más cercana** en todo el rango C2..B7 (nota escrita = de concierto, sin
+  transposición): el afinador oye lo que suene, busca la nota más próxima (temperamento igual, La = `refA`, la misma
+  `tonemap::freqToNote` de la vista ToneMap) y la aguja marca cuántos cents por encima o por debajo estás **de esa nota**.
 - Aguja sobre un arco de ~100° (estilo polímetro analógico), centro = nota correcta, franja verde ±5 cents,
-  escala ±50 cents.
+  escala ±50 cents. Sin lectura válida la aguja vuelve a su posición de reposo (a la izquierda, gris).
+- **Nota detectada**: en grande en el centro del dial (nombre con `#` dibujado, y octava, p. ej. `A#4`; blanca, verde
+  dentro de ±5 cents; un `--` tenue mientras no se oye nada). Arriba en el centro, los cents con signo (`+3c`) y la
+  frecuencia real en Hz.
 - Arriba/abajo: La de referencia en Hz (por defecto 442, rango 400–480, persistente, visible en pantalla).
-- Izquierda/derecha: nota objetivo en saltos de semitono, octavas 3 a 5 (C3–B5).
-- Espacio o `P`: drone (onda senoidal) a la frecuencia de la nota objetivo.
-- Detección: micrófono, autocorrelación normalizada restringida a ±2 semitonos de la nota objetivo.
-  En el ADV micrófono y altavoz comparten reloj I2S: con el drone sonando la detección se pausa.
+- Izquierda/derecha: **solo elige la nota del drone**, en saltos de semitono, octavas 3 a 5 (C3–B5); ya no limita la
+  detección. Debajo del selector pone `Drone <Hz>`.
+- Espacio o `P`: drone (onda senoidal) a la frecuencia de la nota elegida.
+- Motor: el de la vista ToneMap (captura continua a 32 kHz de `tonemap_audio`, ventana de 2048 muestras, `pitch_mpm`
+  con K híbrido y maxLag 720, puerta de ruido rms ≥ 80 —la "Low" de ToneMap—, claridad > 0,8, 14 < Hz < 8200; código
+  común en `tonemap_detect.*`). Una lectura nueva por ventana (~31/s); suavizado exponencial de ~185 ms mientras la
+  nota no cambia (un cambio de nota o un salto de más de 25 cents se toma al instante) y la lectura se mantiene 0,7 s
+  sin ventanas válidas antes de devolver la aguja al reposo.
+- En el ADV micrófono y altavoz comparten reloj I2S: con el drone sonando no se escucha (la aguja y el dial se ponen
+  grises y el centro dice `Mic off (drone playing)`).
 
 ### Afinador — vista ToneMap
 
@@ -86,7 +98,7 @@ Los criterios de aceptación (brief §6) se marcan al final de esta sección.
 
 #### Entrar y salir
 
-- Estando en el afinador, **`T` alterna** entre la vista clásica (aguja + nota objetivo, la de ahora) y la vista
+- Estando en el afinador, **`T` alterna** entre la vista clásica (aguja + nota detectada automáticamente) y la vista
   **ToneMap**. Hoy `T` dentro del afinador no hace nada.
 - Al llegar al afinador desde otro modo, se abre **la última vista usada** (persistida en NVS).
 - La barra inferior no cambia: sigue mostrando `T:Tuner` resaltado. Las demás teclas globales siguen igual
@@ -129,9 +141,15 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
     centro `rgb(200,255,200)` (casi blanco con un toque verde), alto `rgb(255,110,0)`; interpolación lineal en
     RGB centro→alto y centro→bajo. Luminancia estrictamente ordenada centro > alto > bajo, así que también
     funciona en escala de grises.
-  - **Classic** (1): centro `rgb(0,255,0)`; alto = verde → amarillo `(255,255,0)` → rojo `(255,0,0)`; bajo =
-    verde → cian `(0,255,255)` → azul `(0,0,255)` (degradados de tres tramos: `t` en [0, 0,5] el primero, [0,5, 1]
-    el segundo). Ojo: con protanopía/deuteranopía el verde y el amarillo/rojo se confunden.
+  - **Extreme** (1; antes "Classic"; ignora el daltonismo, de eso se ocupa Safe): primarios puros lo más separados
+    posible en CIELAB (ΔE76 verde–azul 259, azul–rojo 176, verde–rojo 171); centro `rgb(0,255,0)`; alto = verde →
+    amarillo `(255,255,0)` → rojo `(255,0,0)`; bajo = verde → cian `(0,255,255)` → azul `(0,0,255)` (degradados de tres
+    tramos, con los puntos medios de luminancia máxima para no pasar por marrón). Dos reglas propias: **rampa
+    empinada** (la tendencia se remapea antes de buscar el color, `t_e = signo(t)·min(1, |t| / 0,3)`, así que el color es
+    rojo/azul pleno desde `|t|` = 0,3: ±9,9 c Relaxed, ±8,3 c Medium, ±4,4 c Hard; el verde puro de la zona muerta no
+    cambia y amarillo/cian salen en `|t|` = 0,15) y **sin atenuar** (una celda con sonido acumulado se pinta con
+    intensidad `0,75 + 0,25·display`, nunca por debajo del 75 %; las celdas visitadas pero nunca manchadas siguen
+    negras y las desvanecidas se quedan en `0,75 + 0,25·0,45` = 0,8625). Safe no cambia. Ver `TONEMAP_DESIGN.md` §13.7.
   - **Rampa** (más estrecha que en tonemap.live, decisión tras pruebas en dispositivo): centro puro hasta ±6,2 c
     (Relaxed), ±5,2 c (Medium), ±2,0 c (Hard); color pleno desde ±18,5 c, ±15,5 c y ±10,1 c respectivamente
     (`span` = 2·dz, 2·dz y 4·dz). Intensidad plena a los **250 ms** de sonido acumulado, y el desvanecido baja
@@ -153,7 +171,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 - **Mensajes transitorios** al cambiar un ajuste: durante 1,5 s ocupan el sitio de nota/cents/Hz (la parte
   derecha sigue visible): `Sensitivity: Hard`,
   `History: 30 s`, `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`,
-  `LED: off`, `Palette: Safe` / `Palette: Classic`, `Map cleared`. En pausa: `Paused (Space)` fijo.
+  `LED: off`, `Palette: Safe` / `Palette: Extreme`, `Map cleared`. En pausa: `Paused (Space)` fijo.
 
 #### Teclas en la vista ToneMap
 
@@ -168,7 +186,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 | `K` | Transposición: C → Bb → Eb → F → … |
 | `F` | Sostenidos ↔ bemoles en etiquetas y franja |
 | `L` | LED de afinado on/off |
-| `P` | Paleta de colores: Safe ↔ Classic (solo redibuja: no reinicia temporizadores ni toca datos). No es tecla global |
+| `P` | Paleta de colores: Safe ↔ Extreme (solo redibuja: no reinicia temporizadores ni toca datos). No es tecla global |
 | `Alt` o `Enter` | Abre / cierra el **panel de opciones** (ver abajo) |
 | `R` | Borrar el mapa (todas las celdas) |
 | `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
@@ -202,7 +220,7 @@ Todos se guardan en NVS con el mecanismo diferido que ya existe (`settings::touc
 | Transposición | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
 | Alteraciones | sharps / flats | sharps | `tmFlats` |
 | LED de afinado | on / off | on | `tmLed` |
-| Paleta | safe / classic | safe | `tmPal` |
+| Paleta | safe / extreme | safe | `tmPal` (0 = Safe, 1 = Extreme) |
 | La de referencia | 400–480 Hz | 442 (ya existe) | `refA` (ya existe) |
 
 Los valores de transposición son los de ToneMap (semitonos; nota escrita = nota de concierto − valor, ver §3.2).

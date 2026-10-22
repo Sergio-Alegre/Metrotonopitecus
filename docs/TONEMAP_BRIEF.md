@@ -81,7 +81,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
   (`visited`).
 - **Color de fondo** = mezcla entre negro y el color de tendencia según la intensidad (§3.4).
   Paleta fija (la de ToneMap): alto `#FFAA00`, centro `rgb(34,197,94)`, bajo `#0056D6`.
-  *(Sustituido el 2026-10-22: dos paletas, Safe y Classic, tecla `P`; ver la nota "Cambios tras pruebas en
+  *(Sustituido el 2026-10-22: dos paletas, Safe y Extreme (antes Classic), tecla `P`; ver la nota "Cambios tras pruebas en
   dispositivo" al final y `SPEC.md`.)*
 - **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): borde blanco interior de 2 px
   *(sustituido el 2026-10-22 por cuatro esquinas en L)*,
@@ -115,7 +115,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 | `K` | Transposición: C → Bb → Eb → F → … |
 | `F` | Sostenidos ↔ bemoles en etiquetas y franja |
 | `L` | LED de afinado on/off |
-| `P` | Paleta Safe ↔ Classic *(añadida el 2026-10-22)* |
+| `P` | Paleta Safe ↔ Extreme *(añadida el 2026-10-22; antes "Classic")* |
 | `R` | Borrar el mapa (todas las celdas) |
 | `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
 | Izquierda / Derecha | Sin uso en la v1 (reservadas para temperamentos en el futuro) |
@@ -136,7 +136,7 @@ Todos se guardan en NVS con el mecanismo diferido que ya existe (`settings::touc
 | Transposición | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
 | Alteraciones | sharps / flats | sharps | `tmFlats` |
 | LED de afinado | on / off | on | `tmLed` |
-| Paleta *(añadida el 2026-10-22)* | safe / classic | safe | `tmPal` |
+| Paleta *(añadida el 2026-10-22)* | safe / extreme | safe | `tmPal` |
 | La de referencia | 400–480 Hz | 442 (ya existe) | `refA` (ya existe) |
 
 Los valores de transposición son los de ToneMap (semitonos; nota escrita = nota de concierto − valor, ver §3.2).
@@ -605,8 +605,9 @@ tonemap.live y a las secciones anteriores (el detalle y la justificación están
   esquinas en L (brazos de 5 px, 2 px de grosor), en negro o blanco según la luminancia del color de la celda.
   La línea de referencia negra de 2 px y la aguja no cambian.
 - **Paletas** (§2.3, sustituye a la paleta fija): `Safe` (por defecto; azul – casi blanco – naranja, pensada para
-  daltonismo y con la luminancia ordenada centro > alto > bajo) y `Classic` (verde en el centro; amarillo y rojo
-  para alto; cian y azul para bajo). Tecla `P`, ajuste `tmPal`, mensaje `Palette: Safe` / `Palette: Classic`.
+  daltonismo y con la luminancia ordenada centro > alto > bajo) y `Extreme` (antes `Classic`; primarios puros: verde en el
+  centro, amarillo y rojo para alto, cian y azul para bajo; rampa empinada —color pleno desde `|t|` = 0,3— y sin atenuar por
+  debajo del 75 %, ver `TONEMAP_DESIGN.md` §13.7). Tecla `P`, ajuste `tmPal`, mensaje `Palette: Safe` / `Palette: Extreme`.
   Las etiquetas de las celdas tocadas pasan a negro o blanco según la luminancia del color mostrado.
 - **Rampa más estrecha** (§3.3): `span` = 2·dz en Relaxed y Medium, 4·dz en Hard (antes 4, 4 y 8). Color pleno desde
   ±18,5 c (Relaxed), ±15,5 c (Medium) y ±10,1 c (Hard); la zona de centro puro no cambia (±6,2 / ±5,2 / ±2,0 c).

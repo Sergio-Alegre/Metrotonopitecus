@@ -191,7 +191,7 @@ extern const SensConst kSens[3];             // {0.0025,0.7,4,350} {0.0021,0.7,4
 constexpr uint32_t kHistoryMs[4]  = {1000, 3000, 30000, 0};            // 0 = unlimited
 constexpr int32_t  kHoldMs[6]     = {5000, 15000, 30000, 120000, 300000, -1};  // -1 = no fade
 constexpr int8_t   kTransposeSemis[4] = {0, -2, 3, 5};
-struct Rgb { uint8_t r, g, b; };             // (2026-10-22: paletas Safe / Classic en lugar de kHigh/kCenter/kLow, ver §13)
+struct Rgb { uint8_t r, g, b; };             // (2026-10-22: paletas Safe / Extreme (antes Classic) en lugar de kHigh/kCenter/kLow, ver §13)
 
 // The single place a temperament would plug in.
 float latticeOffsetCents(int concertMidi);                       // 0 in v1
@@ -392,7 +392,7 @@ int tmGate   = 1;      // 0 none 1 low 2 med 3 high
 int tmTransp = 0;      // semitones: 0, -2, 3, 5
 int tmFlats  = 0;
 int tmLed    = 1;
-int tmPalette = 0;   // 2026-10-22: 0 safe, 1 classic (ver §13)
+int tmPalette = 0;   // 2026-10-22: 0 safe, 1 extreme (antes classic; ver §13)
 ```
 Claves NVS: `tunerView`, `tmSens`, `tmHist`, `tmHold`, `tmGate`, `tmTransp`, `tmFlats`, `tmLed`, y desde 2026-10-22 `tmPal` (≤ 15 car.).
 `clampAll`: `constrain` de cada una; `tmTransp` se fuerza a 0 si no está en {0, −2, 3, 5} (guardar semitonos hace
@@ -466,7 +466,7 @@ el on/off del drone; cuesta ~300 ms al pulsar `T`.
 | `K` | rota transposición; `model.setTransposition`; mensaje |
 | `F` | alterna `tmFlats`; mensaje |
 | `L` | alterna `tmLed`; brillo/LED como arriba; mensaje |
-| `P` | (2026-10-22) alterna `tmPalette`; `model.setPalette`; mensaje `Palette: Safe` / `Palette: Classic` |
+| `P` | (2026-10-22) alterna `tmPalette`; `model.setPalette`; mensaje `Palette: Safe` / `Palette: Extreme` |
 | `R` | `model.reset`; mensaje |
 | `Space` | pausa/reanuda (el reloj del mapa se para) |
 | Arriba/Abajo | `refA ± 1` (400..480); `model.setRefA` |
@@ -685,11 +685,11 @@ etiqueta (que empieza en x+2, y+2). Se dibujan antes que la línea de referencia
 
 El modelo sigue calculando la tendencia como antes, pero ahora la expone como `float biasT(Sensitivity, avgErrRatio)`:
 `t` con signo en [−1, +1] (+ = alto), 0 dentro de la zona muerta o con NaN. `Rgb paletteColor(int palette, float t)`
-la convierte en color; `Model::setPalette(int)` guarda la paleta (0 Safe, 1 Classic; fuera de rango se recorta) y
+la convierte en color; `Model::setPalette(int)` guarda la paleta (0 Safe, 1 Extreme; fuera de rango se recorta) y
 `cellColor` la usa. Cambiar de paleta solo exige redibujar: no toca datos ni temporizadores (`setPalette` no lleva
 `nowMs`). `biasColor(palette, s, avgErrRatio)` queda como atajo `paletteColor(palette, biasT(...))`.
 
-| t | Safe (0) | Classic (1) |
+| t | Safe (0) | Extreme (1), sin remapeo (ver §13.7 para el real) |
 |---|---|---|
 | −1 | (0, 100, 255) | (0, 0, 255) |
 | −0,5 | (100, 178, 228) | (0, 255, 255) |
@@ -702,25 +702,25 @@ la convierte en color; `Model::setPalette(int)` guarda la paleta (0 Safe, 1 Clas
   sobre todo la luminancia. Además la **luminancia está ordenada estrictamente** centro (0,94) >
   alto (0,52) > bajo (0,35) (luminancia relativa sobre los canales codificados, pesos Rec. 709), de modo que la
   información no depende solo del tono: sirve en escala de grises y cuando el contraste de tono falla.
-- **Classic:** la idea original de Sergio (verde centro, rojo alto, azul bajo) con los puntos intermedios de máxima
+- **Extreme (antes Classic):** la idea original de Sergio (verde centro, rojo alto, azul bajo) con los puntos intermedios de máxima
   luminancia (amarillo, cian) para que el degradado no se oscurezca a mitad de camino. Es la opción menos segura
   para daltonismo: con protanopía/deuteranopía el verde y el amarillo/naranja se parecen mucho.
 - **Comprobación aproximada** (matrices de Machado et al. 2009 con severidad 1, escritas de memoria, ΔE76 en CIELAB;
   orientativa, no es una prueba clínica ni se hizo con una herramienta de simulación independiente):
   Safe mantiene ΔE ≥ 47 entre sus tres puntos en visión normal, protanopía, deuteranopía y tritanopía (mínimo 47 en
-  bajo–centro con tritanopía, 54 en centro–alto con protanopía). Classic cae a ΔE 8 (protanopía) y 20 (deuteranopía)
+  bajo–centro con tritanopía, 54 en centro–alto con protanopía). Extreme cae a ΔE 8 (protanopía) y 20 (deuteranopía)
   entre el verde y el amarillo, y a 17 entre cian y verde con tritanopía. La paleta ToneMap antigua tenía ΔE 24 entre
   centro y alto con protanopía.
 - **Etiquetas y marcadores:** negro o blanco según `useBlackLabel(Rgb)` (`relLuminance` > 0,5, función pura probada en
   el banco). La luminancia se calcula sobre los canales sRGB **codificados** (no linealizados): con el umbral 0,5
   sobre la luminancia lineal, el naranja (0,32) llevaría texto blanco de peor contraste. Con la regla actual: texto
   negro sobre el centro de Safe, el naranja pleno (0,521, justo por encima del umbral: al atenuarse pasa a blanco) y
-  los centros, amarillos y cianes de Classic; blanco sobre el azul, el rojo y las celdas oscuras. Las celdas nunca
+  los centros, amarillos y cianes de Extreme; blanco sobre el azul, el rojo y las celdas oscuras. Las celdas nunca
   tocadas siguen con la etiqueta gris `#4b5563` sobre negro.
 - **Ajuste:** `tmPalette` (0..1, defecto 0, clave NVS `tmPal`), `clampAll`/`load`/`tick`, y la línea serie
   `[settings] tuner:` lleva `pal=%d`. Tecla `P` solo en la vista ToneMap (no es global), mensaje de 1,5 s
-  `Palette: Safe` / `Palette: Classic`.
-- **Riesgo conocido:** la aguja (`#ef4444`) casi no se distingue sobre el rojo pleno de Classic (alto) y poco sobre el
+  `Palette: Safe` / `Palette: Extreme`.
+- **Riesgo conocido:** la aguja (`#ef4444`) casi no se distingue sobre el rojo pleno de Extreme (alto) y poco sobre el
   naranja de Safe; se dejó la aguja intacta por petición expresa. La línea de referencia negra sí se ve.
 
 ### 13.3 Mapa más contrastado
@@ -763,3 +763,58 @@ por serie se mantienen en todos los entornos (no se dibujan en pantalla).
   transposición: nada. Nunca toca el medidor (x ≥ 206).
 - **No verificado sin el dispositivo:** que la matriz del teclado informe `Alt` pulsada sola (en M5Cardputer es un modificador;
   `keysState().alt` se activa en `updateKeysState`, pero no se ha probado). `Enter` es el recurso seguro.
+
+### 13.6 Afinador clásico con detección automática (2026-10-22)
+
+Con el motor de ToneMap, la vista clásica ya no busca solo la nota elegida (±2 semitonos) sino que oye todo el rango
+C2..B7 y muestra la nota **más cercana** con los cents respecto a ella. El selector de arriba (`< 4A# >`, Izq./Der.) pasa a
+elegir solo la nota del **drone** (se rotula `Drone <Hz>`).
+
+- **Motor.** `tonemap_audio` (captura continua a 32 kHz) -> `tonemap_detect::analyse` (el mismo código que la vista ToneMap:
+  `mpm::prepare` + puerta rms + `mpm::findPitch` con K híbrido y maxLag 720 + claridad > 0,8 + 14 < Hz < 8200) ->
+  `tonemap::freqToNote(hz, refA)` (transposición 0). Puerta fija rms >= 80 (la "Low", `kGateRms[1]`). Una nota fuera de C2..B7
+  (36..107) se descarta. `tonemap_detect.cpp` guarda los tres búferes de análisis (~15 KB) que antes eran de `tonemap_view.cpp`;
+  la vista ToneMap llama a la misma función sin cambiar su comportamiento. `pitch.cpp/.h` (detector antiguo) ya no se usa.
+- **Aguja y suavizado.** Una lectura por ventana (~31/s). Dentro de la misma nota, suavizado exponencial con tau = 185 ms
+  (equivale al 0,5 por fotograma de 128 ms del detector anterior); si la nota cambia o el salto supera 25 cents, se toma al
+  instante. La lectura se mantiene 700 ms sin ventanas válidas y entonces la aguja vuelve al reposo (igual que antes). La aguja
+  conserva su aproximación exponencial de 70 ms.
+- **Entrada y salida** (misma disciplina que `tonemap::enter/leave`, §7.5): entrar = (`micStop` si el mic estaba encendido)
+  `attach()` -> `audio::micStart()` -> `start()`; salir = `stop()` -> `audio::micStop()` -> `detach()`. El drone la
+  corta: activarlo hace `stop/micStop/detach` y luego `droneStart`; desactivarlo hace `droneStop` (con su fundido) y vuelve a
+  entrar. `leaveClassic()` hace `droneStop` y luego salir. Con el drone sonando el dial se pone gris y el centro dice
+  `Mic off (drone playing)`.
+- **Pantalla** (lienzo 240 x 125): arriba a la izquierda el selector del drone (y 15) y `Drone <Hz>` (y 32); arriba en el
+  centro (x 118) los cents (Font4, y 1) y los Hz (Font0, y 28); arriba a la derecha `A=442 Hz` con las flechas; en el centro del
+  dial la nota detectada en DejaVu40 con la línea base en y 121 y el `#` de `drawSharp` (30 px); la aguja nace en r = 94 para dejar
+  libre el interior del dial. Pie: `Microphone unavailable` a la izquierda, `Space: drone` a la derecha.
+- **Signo `#`** (`drawSharp`): dos barras verticales de 2 px (3 px a partir de h = 24), la derecha 2 px más alta, y dos barras
+  de la misma anchura que suben a la derecha y sobresalen 2 px de los palos, dibujadas columna a columna con `fillRect`.
+
+### 13.7 Paleta Extreme: rampa empinada y sin atenuar (2026-10-22)
+
+Segunda tanda de pruebas: la paleta Extreme (antes Classic) no era lo bastante extrema. Se separan al máximo los tres estados y
+se ignora el daltonismo (Safe lo cubre). Cambios solo en la paleta 1:
+
+- **Extremos:** primarios sRGB puros, bajo `(0,0,255)`, centro `(0,255,0)`, alto `(255,0,0)`; puntos medios amarillo y cian.
+  ΔE76 (CIELAB, D65): verde–azul 258,7, azul–rojo 176,3, verde–rojo 170,6 (mínimo 170,6). Entre los vértices del cubo
+  {R,G,B,C,M,Y} con el verde de centro, ningún otro par (bajo, alto) iguala ese mínimo (el mejor siguiente, magenta–rojo, da 129,5).
+- **Rampa empinada:** antes de buscar el color, `t_e = signo(t) * min(1, |t| / kExtremeFullT)` con `kExtremeFullT = 0,3`. La zona de
+  verde puro (zona muerta de `biasT`) no cambia; el color es rojo/azul pleno desde `|t|` = 0,3 y amarillo/cian en 0,15.
+  En cents (pleno / amarillo-cian): Relaxed 9,87 / 8,02, Medium 8,29 / 6,74, Hard 4,44 / 3,23 (verde puro hasta 6,17 / 5,19 / 2,02).
+- **Sin atenuar:** para la paleta 1 la intensidad efectiva es `kExtremeMinDisplay + (1 - kExtremeMinDisplay) * display` =
+  `0,75 + 0,25 * display`. Una celda manchada nunca baja del 75 %; las desvanecidas (display 0,45) quedan en 0,8625 y las notas
+  cortas (display 0,5) en 0,875. Visitada pero nunca manchada sigue en negro. Safe usa el display tal cual.
+- **Etiquetas y esquinas** siguen la regla de luminancia sobre el color mostrado.
+
+| t | RGB (Extreme, display 1) |
+|---|---|
+| −1, −0,5 | (0, 0, 255) |
+| −0,15 | (0, 255, 255) |
+| 0 | (0, 255, 0) |
+| +0,15 | (255, 255, 0) |
+| +0,5, +1 | (255, 0, 0) |
+
+Tests (`tonemap_bench.cpp`, con los valores rederivados en el port Python): puntos de paleta exactos, casos de color con tolerancia 4
+(la cuantización de 16 bits del historial se amplifica en la rampa empinada, ~160-210 niveles por cent), mezcla a display 0,5,
+umbrales en cents, desvanecido (246 a 0,8625, 220 a 0,45 en +12 c Medium) y la regla `0,75 + 0,25 * display`.

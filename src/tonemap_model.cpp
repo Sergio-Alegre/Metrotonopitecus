@@ -51,12 +51,13 @@ inline RgbF lerpRgb(const Rgb& from, const Rgb& to, float u) {
 RgbF paletteF(int palette, float t) {
     if (!(t == t)) t = 0.0f;
     t = clampf(t, -1.0f, 1.0f);
-    if (palette == 1) {  // Classic: green -> yellow -> red / green -> cyan -> blue
-        const float a = t < 0.0f ? -t : t;  // distance from the centre, 0..1
+    if (palette == 1) {  // Extreme: green -> yellow -> red / green -> cyan -> blue
+        // distance from the centre of the steep ramp, 0..1: t_e = sign(t) * clamp(|t| / kExtremeFullT, 0, 1)
+        const float a = clampf((t < 0.0f ? -t : t) / kExtremeFullT, 0.0f, 1.0f);
         const bool high = t >= 0.0f;
-        const Rgb& mid = high ? kClassicHighMid : kClassicLowMid;
-        const Rgb& end = high ? kClassicHigh : kClassicLow;
-        return a <= 0.5f ? lerpRgb(kClassicCentre, mid, a * 2.0f) : lerpRgb(mid, end, (a - 0.5f) * 2.0f);
+        const Rgb& mid = high ? kExtremeHighMid : kExtremeLowMid;
+        const Rgb& end = high ? kExtremeHigh : kExtremeLow;
+        return a <= 0.5f ? lerpRgb(kExtremeCentre, mid, a * 2.0f) : lerpRgb(mid, end, (a - 0.5f) * 2.0f);
     }
     // Safe (default): centre -> high / centre -> low, linear in RGB.
     return t >= 0.0f ? lerpRgb(kSafeCentre, kSafeHigh, t) : lerpRgb(kSafeCentre, kSafeLow, -t);
@@ -467,8 +468,9 @@ Rgb Model::cellColor(int writtenMidi, uint32_t nowMs, bool* visited) const {
     const float display = evalDisplay(s, nowMs);
     if (display <= 0.001f) return black;
     const RgbF bias = paletteF(palette_, biasT(sens_, avgErrRatio(concert)));
-    // lerp(background = black, bias, display), rounded per channel
-    Rgb o = {toByte(bias.r * display), toByte(bias.g * display), toByte(bias.b * display)};
+    // lerp(background = black, bias, shown intensity), rounded per channel. Extreme never dims below 0.75.
+    const float k = palette_ == 1 ? kExtremeMinDisplay + (1.0f - kExtremeMinDisplay) * display : display;
+    Rgb o = {toByte(bias.r * k), toByte(bias.g * k), toByte(bias.b * k)};
     return o;
 }
 

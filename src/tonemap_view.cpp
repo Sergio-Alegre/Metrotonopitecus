@@ -19,9 +19,9 @@
 #include <string.h>
 
 #include "audio.h"
-#include "pitch_mpm.h"
 #include "settings.h"
 #include "tonemap_audio.h"
+#include "tonemap_detect.h"
 #include "tonemap_model.h"
 
 namespace tonemap {
@@ -29,13 +29,9 @@ namespace tonemap {
 namespace {
 
 // ---- analysis ----------------------------------------------------------------------------
-// Noise gate on the RMS of the DC-free window, int16 units (None, Low, Med, High).
-// Calibrated with a viola on the device (docs/TONEMAP_DESIGN.md section 12).
-constexpr float kGateRms[4] = {0.0f, 80.0f, 200.0f, 450.0f};
-constexpr float kMinClarity = 0.8f;
-constexpr float kMinHz = 14.0f;    // tonemap.live: 14 < pitch < 8200 on the untransposed pitch
-constexpr float kMaxHz = 8200.0f;
-constexpr int kMaxLag = 720;       // 44.4 Hz at 32 kHz (docs/TONEMAP_DESIGN.md section 0.3)
+// The window analysis (noise gate table, clarity and frequency gates, detector) is shared with the
+// classic tuner: tonemap_detect.h.
+using tonemap_detect::kGateRms;
 constexpr uint32_t kNoWindowMs = 300;  // an active note is dropped when no window arrives for this long
 
 // ---- screen (canvas 240 x 125) -----------------------------------------------------------
@@ -91,17 +87,12 @@ const char* const kHistNames[4] = {"1 s", "3 s", "30 s", "Unlimited"};
 const char* const kHoldNames[6] = {"5 s", "15 s", "30 s", "2 min", "5 min", "No fade"};
 const char* const kGateNames[4] = {"None", "Low", "Med", "High"};
 const char* const kTranspNames[4] = {"C", "Bb", "Eb", "F"};
-const char* const kPaletteNames[2] = {"Safe", "Classic"};
+const char* const kPaletteNames[2] = {"Safe", "Extreme"};
 
 // ---- state -------------------------------------------------------------------------------
 // The heat map: ~38 KB in .bss (Model has an empty constructor), never on the stack. It lives as
 // long as the firmware runs, so it survives mode and view switches.
 Model model;
-
-// Analysis buffers (DRAM, static).
-int16_t winBuf[tonemap_audio::kWindow];
-float workBuf[tonemap_audio::kWindow];
-float nsdfBuf[mpm::kMaxLag + 2];
 
 // Map clock: millis() minus the time spent paused, so the fades freeze while paused.
 uint32_t clockOffset = 0;
@@ -318,28 +309,10 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
 #ifdef TONEMAP_DEBUG
     const uint32_t t0 = micros();
 #endif
-    const mpm::Levels lv = mpm::prepare(winBuf, tonemap_audio::kWindow, workBuf);
-    const float gate = kGateRms[gateIdx()];
-    // Energy check (rms > 0) plus the noise gate; a gated window skips the expensive search.
-    const bool loud = lv.rms > 0.0f && lv.rms >= gate;
-
-    bool valid = false;
-    float hz = 0.0f;
-#ifdef TONEMAP_DEBUG
-    float clarity = 0.0f;
-#endif
-    if (loud) {
-        const mpm::Result r =
-            mpm::findPitch(workBuf, tonemap_audio::kWindow, tonemap_audio::effectiveRate(), kMaxLag, nsdfBuf);
-        if (r.found) {
-#ifdef TONEMAP_DEBUG
-            clarity = r.clarity;
-#endif
-            // Comparisons are false for NaN, so a NaN result is never valid.
-            valid = r.clarity > kMinClarity && r.freq > kMinHz && r.freq < kMaxHz;
-            if (valid) hz = r.freq;
-        }
-    }
+    const tonemap_detect::Analysis an = tonemap_detect::analyse(kGateRms[gateIdx()]);
+    const bool loud = an.loud;
+    const bool valid = an.valid;
+    const float hz = an.hz;
 
     const TickResult t = model.tick(valid, hz, wi.dtMs, mapNow());
 
@@ -355,7 +328,7 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
     gateOpen = loud;
 
     // Level meter: instant attack, ~200 ms release.
-    level = lv.rms > level ? lv.rms : level * 0.85f + lv.rms * 0.15f;
+    level = an.rms > level ? an.rms : level * 0.85f + an.rms * 0.15f;
     lastWindowMs = millis();
     analysedThisLoop = true;
 
@@ -367,8 +340,8 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
     ++dbg.windows;
     dbg.anUsSum += us;
     if (us > dbg.anUsMax) dbg.anUsMax = us;
-    dbg.rms = lv.rms;
-    dbg.clar = clarity;
+    dbg.rms = an.rms;
+    dbg.clar = an.clarity;
     dbg.hz = hz;
     dbg.cents = t.hasNote ? t.displayCents : 0.0f;
     if (t.hasNote && inGrid(t.writtenMidi)) {
@@ -696,7 +669,7 @@ void leave() {
     ledOffBlocking();          // while the backlight pin is still held at full brightness
     brightnessRestore();
     audio::micStop();          // waits for the chunks in flight, then brings the speaker back
-    tonemap_audio::detach();   // 16 kHz default for the classic tuner
+    tonemap_audio::detach();   // back to the 16 kHz default (the other modes never record)
     dropNote();
     if (paused) {              // the time spent away from a paused view counts as running time
         clockOffset += (uint32_t)millis() - pauseStart;
@@ -827,7 +800,7 @@ void update() {
         tonemap_audio::service();
         if (!paused) {
             tonemap_audio::WindowInfo wi;
-            if (tonemap_audio::takeWindow(winBuf, wi)) {
+            if (tonemap_audio::takeWindow(tonemap_detect::window(), wi)) {
                 analyse(wi);
             } else if (hasNote && (uint32_t)(millis() - lastWindowMs) > kNoWindowMs) {
                 // No window for a while (capture restarting): do not keep a stale note on screen.
