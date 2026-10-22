@@ -185,8 +185,9 @@ float Model::evalDisplay(const NoteState& s, uint32_t nowMs) const {
     const uint32_t el = nowMs >= s.lastStainMs ? nowMs - s.lastStainMs : 0;
     if (el <= (uint32_t)hold) return d;
     const float target = base * kStainMinFraction;
+    if (target >= d) return d;  // already at or below the floor: never rise toward it (Relaxed, very short notes)
     const uint32_t into = el - (uint32_t)hold;
-    if (into >= kFadeMs) return d < target ? d : target;
+    if (into >= kFadeMs) return target;
     const float p = (float)into / (float)kFadeMs;
     return clampf(d + (target - d) * p, 0.0f, 1.0f);
 }

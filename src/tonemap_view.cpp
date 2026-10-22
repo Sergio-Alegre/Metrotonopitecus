@@ -702,7 +702,7 @@ void leave() {
     audio::micStop();          // waits for the chunks in flight, then brings the speaker back
     tonemap_audio::detach();   // back to the 16 kHz default (the other modes never record)
     dropNote();
-    if (paused) {              // the time spent away from a paused view counts as running time
+    if (paused) {              // settle the pause: the map clock stays frozen across the pause and the time away
         clockOffset += (uint32_t)millis() - pauseStart;
         paused = false;
     }

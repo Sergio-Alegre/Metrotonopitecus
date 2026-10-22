@@ -900,7 +900,8 @@ void testHistory() {
 double fadeExpect(double d, double base, double holdMs, double el) {
     if (el <= holdMs) return d;
     const double target = 0.45 * base;
-    if (el - holdMs >= 10000.0) return d < target ? d : target;
+    if (target >= d) return d;  // never rises toward the floor
+    if (el - holdMs >= 10000.0) return target;
     return d + (target - d) * (el - holdMs) / 10000.0;
 }
 

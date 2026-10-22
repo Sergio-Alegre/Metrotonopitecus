@@ -169,7 +169,13 @@ bool micStart() {
     Serial.printf("[audio] mic begin: %s (enabled=%d, running=%d, rate=%u)\n", micActive ? "ok" : "FAILED",
                   (int)M5Cardputer.Mic.isEnabled(), (int)M5Cardputer.Mic.isRunning(),
                   (unsigned)M5Cardputer.Mic.config().sample_rate);
-    if (!micActive) M5Cardputer.Speaker.begin();
+    if (!micActive) {
+        M5Cardputer.Speaker.begin();
+        // micStop() returns early when the mic never started, so schedule the un-mute here: otherwise the
+        // codec stays muted (silent metronome / drone) until some later successful mic cycle.
+        unmutePending = true;
+        unmuteAt = millis() + kUnmuteDelayMs;
+    }
     return micActive;
 }
 

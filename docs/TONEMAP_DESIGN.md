@@ -758,7 +758,7 @@ por serie se mantienen en todos los entornos (no se dibujan en pantalla).
   por ejemplo, cancela el tap con cualquier otra tecla), `Mode::acceptsAlt()` (falso por defecto) y `main.cpp` descartan
   `Alt` salvo en el afinador con la vista ToneMap (`TunerMode::acceptsAlt()` devuelve `tm_`).
 - **Vista:** `menuOpen` (cerrado en `enter()`/`leave()`). `Alt` o `Enter` alterna. Abierto, `draw()` pinta `drawMenu()` en
-  lugar del mapa y la franja: fondo negro, título `OPTIONS` + `Alt/Enter: close` a la derecha, y 12 líneas a 9 px de paso
+  lugar del mapa y la franja: fondo negro, título `OPTIONS` + `Alt/Enter: close` a la derecha, y 13 líneas (título + 12) a 9 px de paso
   (`S`, `H`, `C`, `N`, `K`, `F`, `P`, `L` con valor en la columna de 13 caracteres tras la etiqueta; `R`, `Space` + `Pause`/`Resume`,
   `Up/Down  A=<refA> (reference)`, `T Classic view`). Las teclas siguen llamando a los mismos manejadores, así que los valores
   se actualizan en vivo; el mensaje transitorio no se muestra.

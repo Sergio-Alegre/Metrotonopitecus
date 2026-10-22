@@ -4,6 +4,8 @@
 #include "pitch_mpm.h"
 #include "tonemap_audio.h"
 
+static_assert(tonemap_detect::kMaxLag <= mpm::kMaxLag, "tonemap_detect::kMaxLag must not exceed the detector buffer cap");
+
 namespace tonemap_detect {
 
 namespace {
