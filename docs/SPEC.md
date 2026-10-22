@@ -57,7 +57,7 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
   Un círculo por pulso, justificados a la izquierda en la fila inferior (con 6 caben junto a la pista
   "B: beats", a la derecha). Acento en el primero.
 - LED RGB integrado (GPIO 21, brillo máximo): destello en cada pulso (no en subdivisiones), blanco en el
-  acento y azul en los demás (par apto para daltonismo; los círculos de pantalla usan los mismos colores; el destello
+  acento y verde en los demás (par apto para daltonismo, ΔE mínimo simulado 57 frente a 28 de rojo/verde; los círculos de pantalla usan los mismos colores; el destello
   del acento dura 1,5 veces más, una pista que no depende del color). Se enciende justo al terminar de enviar a la pantalla el fotograma con el
   círculo iluminado, para que luz y círculo coincidan. Duración = 1/5 del pulso entre 30 y 80 ms (80 ms
   hasta 150 BPM, 40 ms a 300 BPM). Al parar, por serie sale el retardo medio clic→LED.
