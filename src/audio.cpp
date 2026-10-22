@@ -110,8 +110,9 @@ void begin() {
 
 void setVolumeLevel(int level) { M5Cardputer.Speaker.setVolume(levelToVolume(level)); }
 
-void click(float hz, uint32_t ms) {
+void click(float hz, uint32_t ms, uint8_t gain) {
     if (micActive) return;
+    M5Cardputer.Speaker.setChannelVolume(kClickChannel, gain);
     M5Cardputer.Speaker.tone(hz, ms, kClickChannel, true);
 }
 
