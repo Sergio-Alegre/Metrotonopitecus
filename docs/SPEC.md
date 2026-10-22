@@ -115,14 +115,29 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 
 - Líneas de cuadrícula 1 px `#374151`. Fondo `#000000`.
 - **Etiqueta:** solo el nombre de la nota (`C#`, o `Db` con bemoles); la columna C lleva además la octava
-  (`C4`). Font0, color `#4b5563` mientras la celda no se ha tocado nunca, blanco cuando ya se ha tocado
-  (`visited`).
-- **Color de fondo** = mezcla entre negro y el color de tendencia según la intensidad (§3.4).
-  Paleta fija (la de ToneMap): alto `#FFAA00`, centro `rgb(34,197,94)`, bajo `#0056D6`.
-- **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): borde blanco interior de 2 px,
-  una línea de referencia negra de 2 px en el centro vertical de la celda y la **aguja**: barra roja
-  `#ef4444` de 2 px de alto a lo ancho de la celda. Posición vertical: arriba = alto. Recorrido del 10 % al
-  90 % de la altura para −50…+50 cents (fórmula en §3.5).
+  (`C4`). Font0. Color `#4b5563` mientras la celda no se ha tocado nunca; una vez tocada (`visited`), **negro o
+  blanco según la luminancia relativa del color que muestra la celda** (0,2126 R + 0,7152 G + 0,0722 B sobre
+  los canales sRGB codificados, 0..1; mayor que 0,5 → negro, si no blanco), para que se lea sobre el casi
+  blanco del centro de la paleta Safe y sobre las celdas oscuras (desvanecidas o poco tocadas).
+- **Color de fondo** = mezcla entre negro y el color de tendencia según la intensidad (§3.4). El modelo da la
+  tendencia con signo `t` en [−1, +1] (+ = alto/sostenido, 0 = centro) y una **paleta** la convierte en color
+  (todos los colores a intensidad plena; la mezcla con negro por la intensidad se mantiene):
+  - **Safe** (0, por defecto; pensada para daltonismo rojo-verde y azul-amarillo): bajo `rgb(0,100,255)`,
+    centro `rgb(200,255,200)` (casi blanco con un toque verde), alto `rgb(255,110,0)`; interpolación lineal en
+    RGB centro→alto y centro→bajo. Luminancia estrictamente ordenada centro > alto > bajo, así que también
+    funciona en escala de grises.
+  - **Classic** (1): centro `rgb(0,255,0)`; alto = verde → amarillo `(255,255,0)` → rojo `(255,0,0)`; bajo =
+    verde → cian `(0,255,255)` → azul `(0,0,255)` (degradados de tres tramos: `t` en [0, 0,5] el primero, [0,5, 1]
+    el segundo). Ojo: con protanopía/deuteranopía el verde y el amarillo/rojo se confunden.
+  - **Rampa** (más estrecha que en tonemap.live, decisión tras pruebas en dispositivo): centro puro hasta ±6,2 c
+    (Relaxed), ±5,2 c (Medium), ±2,0 c (Hard); color pleno desde ±18,5 c, ±15,5 c y ±10,1 c respectivamente
+    (`span` = 2·dz, 2·dz y 4·dz). Intensidad plena a los **250 ms** de sonido acumulado, y el desvanecido baja
+    hasta **0,45** de la intensidad base (ToneMap: 500 ms y 0,25). Ver `TONEMAP_DESIGN.md` §13.
+- **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): **cuatro esquinas** en L (brazos de
+  5 px, 2 px de grosor) en negro o blanco según la misma regla de luminancia que la etiqueta, para dejar visible
+  el interior de la celda (20 × 18 px); una línea de referencia negra de 2 px en el centro vertical de la celda
+  y la **aguja**: barra roja `#ef4444` de 2 px de alto a lo ancho de la celda. Posición vertical: arriba = alto.
+  Recorrido del 10 % al 90 % de la altura para −50…+50 cents (fórmula en §3.5).
 
 #### Franja de información (fila superior)
 
@@ -135,7 +150,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 - **Mensajes transitorios** al cambiar un ajuste: durante 1,5 s ocupan el sitio de nota/cents/Hz (la parte
   derecha sigue visible): `Sensitivity: Hard`,
   `History: 30 s`, `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`,
-  `LED: off`, `Map cleared`. En pausa: `Paused (Space)` fijo.
+  `LED: off`, `Palette: Safe` / `Palette: Classic`, `Map cleared`. En pausa: `Paused (Space)` fijo.
 
 #### Teclas en la vista ToneMap
 
@@ -150,6 +165,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 | `K` | Transposición: C → Bb → Eb → F → … |
 | `F` | Sostenidos ↔ bemoles en etiquetas y franja |
 | `L` | LED de afinado on/off |
+| `P` | Paleta de colores: Safe ↔ Classic (solo redibuja: no reinicia temporizadores ni toca datos). No es tecla global |
 | `R` | Borrar el mapa (todas las celdas) |
 | `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
 | Izquierda / Derecha | Sin uso en la v1 (reservadas para temperamentos en el futuro) |
@@ -170,6 +186,7 @@ Todos se guardan en NVS con el mecanismo diferido que ya existe (`settings::touc
 | Transposición | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
 | Alteraciones | sharps / flats | sharps | `tmFlats` |
 | LED de afinado | on / off | on | `tmLed` |
+| Paleta | safe / classic | safe | `tmPal` |
 | La de referencia | 400–480 Hz | 442 (ya existe) | `refA` (ya existe) |
 
 Los valores de transposición son los de ToneMap (semitonos; nota escrita = nota de concierto − valor, ver §3.2).

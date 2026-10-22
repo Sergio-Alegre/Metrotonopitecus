@@ -54,6 +54,8 @@ constexpr uint32_t kMinDrawGapMs = 50;   // 20 fps
 constexpr uint32_t kOverdueMs = 80;      // a pending frame is drawn even right after an analysis
 constexpr uint32_t kFadePollMs = 500;    // redraw timer while some cell is fading
 constexpr uint32_t kMessageMs = 1500;
+constexpr int kBracketArm = 5;           // active-cell corner brackets: arm length (incl. the corner) ...
+constexpr int kBracketThick = 2;         // ... and thickness, in px
 
 constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
@@ -87,6 +89,7 @@ const char* const kHistNames[4] = {"1 s", "3 s", "30 s", "Unlimited"};
 const char* const kHoldNames[6] = {"5 s", "15 s", "30 s", "2 min", "5 min", "No fade"};
 const char* const kGateNames[4] = {"None", "Low", "Med", "High"};
 const char* const kTranspNames[4] = {"C", "Bb", "Eb", "F"};
+const char* const kPaletteNames[2] = {"Safe", "Classic"};
 
 // ---- state -------------------------------------------------------------------------------
 // The heat map: ~38 KB in .bss (Model has an empty constructor), never on the stack. It lives as
@@ -270,6 +273,7 @@ void syncModel(uint32_t now) {
     if ((int)model.sensitivity() != s.tmSens) model.setSensitivity((Sensitivity)clampi(s.tmSens, 0, 2), now);
     if (model.historyIdx() != s.tmHist) model.setHistory(s.tmHist, now);
     if (model.holdIdx() != s.tmHold) model.setHold(s.tmHold, now);
+    if (model.palette() != s.tmPalette) model.setPalette(s.tmPalette);  // colours only: no timers
     if (fabsf(model.refA() - s.refA) > 1e-4f) model.setRefA(s.refA, now);
     if (model.transposition() != s.tmTransp) model.setTransposition(s.tmTransp, now);
 }
@@ -458,19 +462,35 @@ void drawCell(M5Canvas& c, int row, int col, uint32_t now, bool flats) {
     } else {
         strlcpy(label, flats ? kFlatNames[col] : kSharpNames[col], sizeof(label));
     }
-    c.setTextColor(visited ? kColWhite : kColLabelOff);
+    // Visited: black or white by the luminance of the colour shown (the near-white centre of the Safe
+    // palette needs black text). Never visited: dim grey on black.
+    c.setTextColor(!visited ? kColLabelOff : (useBlackLabel(rgb) ? kColBlack : kColWhite));
     c.drawString(label, x + 2, y + 2);
 }
 
-void drawActiveCell(M5Canvas& c) {
+// One L-shaped mark in a cell corner: (cx, cy) is the corner pixel, (dx, dy) = (+-1, +-1) points into the cell.
+void drawCorner(M5Canvas& c, int cx, int cy, int dx, int dy, uint16_t col) {
+    const int hx = dx > 0 ? cx : cx - kBracketArm + 1;
+    const int hy = dy > 0 ? cy : cy - kBracketThick + 1;
+    c.fillRect(hx, hy, kBracketArm, kBracketThick, col);
+    const int vx = dx > 0 ? cx : cx - kBracketThick + 1;
+    const int vy = dy > 0 ? cy : cy - kBracketArm + 1;
+    c.fillRect(vx, vy, kBracketThick, kBracketArm, col);
+}
+
+void drawActiveCell(M5Canvas& c, uint32_t now) {
     if (!hasNote || !inGrid(writtenMidi)) return;
     const int row = 7 - (writtenMidi / 12 - 1);  // octave 7 is the top row
     const int col = writtenMidi % 12;
     const int x = col * kCellW;
     const int y = kGridY + row * kCellH;
-    // 2 px white border inside the cell, black reference line at the vertical centre, red needle.
-    c.drawRect(x, y, kCellW, kCellH, kColWhite);
-    c.drawRect(x + 1, y + 1, kCellW - 2, kCellH - 2, kColWhite);
+    // Four corner brackets (black or white by the luminance of the colour shown, same rule as the label) leave
+    // the interior visible; then the black reference line at the vertical centre and the red needle on top.
+    const uint16_t mark = useBlackLabel(model.cellColor(writtenMidi, now, nullptr)) ? kColBlack : kColWhite;
+    drawCorner(c, x, y, 1, 1, mark);
+    drawCorner(c, x + kCellW - 1, y, -1, 1, mark);
+    drawCorner(c, x, y + kCellH - 1, 1, -1, mark);
+    drawCorner(c, x + kCellW - 1, y + kCellH - 1, -1, -1, mark);
     c.fillRect(x + 2, y + kCellH / 2 - 1, kCellW - 4, 2, kColBlack);
     c.fillRect(x, y + needleRow(dispCents), kCellW, 2, kColNeedle);
 }
@@ -676,6 +696,12 @@ void onKey(const KeyEvent& e) {
                     }
                     showMessage("LED: %s", s.tmLed ? "on" : "off");
                     break;
+                case 'p':
+                    s.tmPalette = (clampi(s.tmPalette, 0, 1) + 1) % 2;
+                    model.setPalette(s.tmPalette);  // redraw only: no timer restart, no data change
+                    settings::touch();
+                    showMessage("Palette: %s", kPaletteNames[s.tmPalette]);
+                    break;
                 case 'r':
                     model.reset(now);
                     hasNote = false;
@@ -767,7 +793,7 @@ bool draw(M5Canvas& c, bool force) {
     for (int row = 0; row < kRows; ++row) {
         for (int col = 0; col < kCols; ++col) drawCell(c, row, col, mnow, flats);
     }
-    drawActiveCell(c);
+    drawActiveCell(c, mnow);
     drawStrip(c);
 #ifdef TONEMAP_DEBUG
     debugOverlay(c);

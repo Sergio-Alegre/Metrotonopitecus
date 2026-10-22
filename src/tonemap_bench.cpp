@@ -284,19 +284,24 @@ void runTiming() {
 // model's own output:
 //
 //   ratio(c) = 2^(c/1200) - 1                        cents -> errRatio
-//   bias     e' = e*scale; |e'| <= dz -> centre; else t = clamp((|e'|-dz)/(span*dz), 0, 1) and the
-//            colour is centre + (sharp|flat - centre)*t.  Medium: dz 0.0021, scale 0.7, span 4;
-//            Hard: 0.00105, 0.9, 8; Relaxed: 0.0025, 0.7, 4.
+//   bias     e' = e*scale; |e'| <= dz -> t = 0 (centre); else t = sign(e')*clamp((|e'|-dz)/(span*dz), 0, 1).
+//            Medium: dz 0.0021, scale 0.7, span 2; Hard: 0.00105, 0.9, 4; Relaxed: 0.0025, 0.7, 2
+//            (tonemap.live has span 4 / 4 / 8: narrowed on purpose, device feedback 2026-10-22).
 //            Pure centre up to cents(dz/scale) = 6.17 (Relaxed), 5.19 (Medium), 2.02 (Hard);
-//            saturated from cents(dz*(1+span)/scale) = 30.64, 25.78, 18.08.
+//            saturated from cents(dz*(1+span)/scale) = 18.45, 15.51, 10.07.
+//   palette  t in [-1,+1] -> colour. Safe (0): t >= 0 (200,255,200) + ((255,110,0)-(200,255,200))*t,
+//            t < 0 (200,255,200) + ((0,100,255)-(200,255,200))*|t|. Classic (1): green (0,255,0) ->
+//            yellow (255,255,0) -> red (255,0,0) with the stops at |t| = 0, 0.5, 1; low side via cyan
+//            (0,255,255) to blue (0,0,255). The cell shows round(colour * display intensity).
+//   label    black text when 0.2126*R + 0.7152*G + 0.0722*B > 127.5 (0.5 of 255), else white.
 //   history  duration-weighted mean of errRatio over the last H ms of voiced time (the segment on
 //            the window edge enters fractionally), converted back to cents with 1200*log2(1+e).
 //            ToneMap averages in the RATIO domain, so e.g. (1 s at +10 c, 2 s at -10 c) gives
 //            -3.3076 c, not the cents mean -3.3333 c.
-//   fade     hold h, then a linear 10 s ramp from the shown value d to 0.25*base:
-//            d(el) = d for el <= h; d + (0.25*base - d)*(el-h)/10000 inside the ramp; 0.25*base after.
+//   fade     hold h, then a linear 10 s ramp from the shown value d to 0.45*base (ToneMap: 0.25):
+//            d(el) = d for el <= h; d + (0.45*base - d)*(el-h)/10000 inside the ramp; 0.45*base after.
 //   Relaxed  display EMA on every stained frame: d += (base - d)*(1 - exp(-dt/125)),
-//            base = min(1, total/500)  (dt = the tick's dt: documented deviation, design section 0).
+//            base = min(1, total/250)  (ToneMap: 500; dt = the tick's dt: documented deviation, design section 0).
 //   rebase   a history captured against A=a0 is read against a1 as (1+e)*(a0/a1) - 1,
 //            e.g. 442 -> 440: 1200*log2(442/440) = +7.8514 c.
 //   Tolerances: errors are stored as round(e*65536) (0.0131 c per LSB), so cents comparisons use
@@ -372,6 +377,7 @@ void fresh(Sensitivity s, int hist, int hold, float a4 = 440.0f, int transp = 0)
     gModel.setHold(hold, gNow);
     gModel.setRefA(a4, gNow);
     gModel.setTransposition(transp, gNow);
+    gModel.setPalette(0);  // reset() keeps the palette: tests start in Safe
 }
 
 bool rgbNear(const Rgb& c, int r, int g, int b, int tol) {
@@ -447,33 +453,57 @@ void testParity() {
 
 // ---- colour ------------------------------------------------------------------------------
 struct ColorCase {
+    int palette;
     Sensitivity s;
     float cents;
     uint8_t r, g, b;
 };
-// Expected from the bias formulas above (Python, double precision), display intensity 1.
+// Expected from the bias and palette formulas above (Python, double precision, closed form), display
+// intensity 1. Palette 0 = Safe, 1 = Classic. Ramp: Medium pure centre up to 5.19 c, full colour from 15.51 c.
 const ColorCase kColorCases[] = {
-    {Sensitivity::Medium, 0.0f, 34, 197, 94},      {Sensitivity::Medium, 5.0f, 34, 197, 94},
-    {Sensitivity::Medium, 5.4f, 36, 197, 93},      {Sensitivity::Medium, 10.0f, 85, 191, 72},
-    {Sensitivity::Medium, 15.6f, 145, 183, 47},    {Sensitivity::Medium, 20.0f, 193, 178, 26},
-    {Sensitivity::Medium, 26.0f, 255, 170, 0},     {Sensitivity::Medium, 40.0f, 255, 170, 0},
-    {Sensitivity::Medium, -5.0f, 34, 197, 94},     {Sensitivity::Medium, -5.4f, 34, 196, 95},
-    {Sensitivity::Medium, -15.6f, 17, 142, 154},   {Sensitivity::Medium, -40.0f, 0, 86, 214},
-    {Sensitivity::Hard, 0.0f, 34, 197, 94},        {Sensitivity::Hard, 1.9f, 34, 197, 94},
-    {Sensitivity::Hard, 2.3f, 38, 197, 92},        {Sensitivity::Hard, 10.0f, 144, 184, 47},
-    {Sensitivity::Hard, 18.2f, 255, 170, 0},       {Sensitivity::Hard, 25.0f, 255, 170, 0},
-    {Sensitivity::Hard, -10.0f, 17, 142, 153},     {Sensitivity::Hard, -25.0f, 0, 86, 214},
-    {Sensitivity::Relaxed, 0.0f, 34, 197, 94},     {Sensitivity::Relaxed, 6.0f, 34, 197, 94},
-    {Sensitivity::Relaxed, 6.5f, 37, 197, 93},     {Sensitivity::Relaxed, 18.0f, 140, 184, 49},
-    {Sensitivity::Relaxed, 31.0f, 255, 170, 0},    {Sensitivity::Relaxed, 40.0f, 255, 170, 0},
-    {Sensitivity::Relaxed, -18.0f, 18, 144, 151},  {Sensitivity::Relaxed, -40.0f, 0, 86, 214},
+    // ---- Safe
+    {0, Sensitivity::Medium, 0.0f, 200, 255, 200},   {0, Sensitivity::Medium, 5.0f, 200, 255, 200},
+    {0, Sensitivity::Medium, 5.4f, 201, 252, 196},   {0, Sensitivity::Medium, 8.0f, 215, 216, 146},
+    {0, Sensitivity::Medium, 10.0f, 226, 188, 107},  {0, Sensitivity::Medium, 12.0f, 236, 159, 68},
+    {0, Sensitivity::Medium, 15.0f, 252, 117, 10},   {0, Sensitivity::Medium, 16.0f, 255, 110, 0},
+    {0, Sensitivity::Medium, 40.0f, 255, 110, 0},    {0, Sensitivity::Medium, -5.0f, 200, 255, 200},
+    {0, Sensitivity::Medium, -5.4f, 196, 252, 201},  {0, Sensitivity::Medium, -8.0f, 146, 213, 215},
+    {0, Sensitivity::Medium, -10.0f, 108, 184, 225}, {0, Sensitivity::Medium, -12.0f, 70, 154, 236},
+    {0, Sensitivity::Medium, -15.0f, 12, 110, 252},  {0, Sensitivity::Medium, -16.0f, 0, 100, 255},
+    {0, Sensitivity::Medium, -40.0f, 0, 100, 255},
+    {0, Sensitivity::Hard, 0.0f, 200, 255, 200},     {0, Sensitivity::Hard, 1.9f, 200, 255, 200},
+    {0, Sensitivity::Hard, 2.3f, 202, 250, 193},     {0, Sensitivity::Hard, 6.0f, 227, 183, 101},
+    {0, Sensitivity::Hard, 8.0f, 241, 147, 51},      {0, Sensitivity::Hard, 10.5f, 255, 110, 0},
+    {0, Sensitivity::Hard, 25.0f, 255, 110, 0},      {0, Sensitivity::Hard, -6.0f, 102, 179, 227},
+    {0, Sensitivity::Hard, -10.5f, 0, 100, 255},     {0, Sensitivity::Hard, -25.0f, 0, 100, 255},
+    {0, Sensitivity::Relaxed, 0.0f, 200, 255, 200},  {0, Sensitivity::Relaxed, 6.0f, 200, 255, 200},
+    {0, Sensitivity::Relaxed, 6.5f, 201, 251, 195},  {0, Sensitivity::Relaxed, 10.0f, 217, 210, 138},
+    {0, Sensitivity::Relaxed, 14.0f, 235, 163, 73},  {0, Sensitivity::Relaxed, 18.0f, 253, 115, 7},
+    {0, Sensitivity::Relaxed, 19.0f, 255, 110, 0},   {0, Sensitivity::Relaxed, 40.0f, 255, 110, 0},
+    {0, Sensitivity::Relaxed, -10.0f, 139, 208, 217}, {0, Sensitivity::Relaxed, -14.0f, 74, 158, 235},
+    {0, Sensitivity::Relaxed, -40.0f, 0, 100, 255},
+    // ---- Classic
+    {1, Sensitivity::Medium, 0.0f, 0, 255, 0},       {1, Sensitivity::Medium, 5.0f, 0, 255, 0},
+    {1, Sensitivity::Medium, 8.0f, 139, 255, 0},     {1, Sensitivity::Medium, 10.4f, 255, 253, 0},
+    {1, Sensitivity::Medium, 12.0f, 255, 174, 0},    {1, Sensitivity::Medium, 15.0f, 255, 25, 0},
+    {1, Sensitivity::Medium, 16.0f, 255, 0, 0},      {1, Sensitivity::Medium, 40.0f, 255, 0, 0},
+    {1, Sensitivity::Medium, -8.0f, 0, 255, 137},    {1, Sensitivity::Medium, -10.0f, 0, 255, 235},
+    {1, Sensitivity::Medium, -12.0f, 0, 178, 255},   {1, Sensitivity::Medium, -16.0f, 0, 0, 255},
+    {1, Sensitivity::Medium, -40.0f, 0, 0, 255},
+    {1, Sensitivity::Hard, 0.0f, 0, 255, 0},         {1, Sensitivity::Hard, 6.0f, 252, 255, 0},
+    {1, Sensitivity::Hard, 8.0f, 255, 131, 0},       {1, Sensitivity::Hard, 10.5f, 255, 0, 0},
+    {1, Sensitivity::Hard, -6.0f, 0, 255, 251},      {1, Sensitivity::Hard, -10.5f, 0, 0, 255},
+    {1, Sensitivity::Relaxed, 0.0f, 0, 255, 0},      {1, Sensitivity::Relaxed, 10.0f, 159, 255, 0},
+    {1, Sensitivity::Relaxed, 14.0f, 255, 185, 0},   {1, Sensitivity::Relaxed, 19.0f, 255, 0, 0},
+    {1, Sensitivity::Relaxed, -10.0f, 0, 255, 156},  {1, Sensitivity::Relaxed, -14.0f, 0, 190, 255},
+    {1, Sensitivity::Relaxed, -40.0f, 0, 0, 255},
 };
-// Same notes with only 250 ms of voiced time: base = display = 0.5, colour = round(bias*0.5).
+// Same notes with only 125 ms of voiced time: base = display = 0.5 (FULL_CONF 250), colour = round(colour*0.5).
 const ColorCase kBlendCases[] = {
-    {Sensitivity::Medium, 15.6f, 73, 92, 23},
-    {Sensitivity::Medium, -15.6f, 9, 71, 77},
-    {Sensitivity::Hard, 10.0f, 72, 92, 24},
-    {Sensitivity::Medium, 0.0f, 17, 99, 47},
+    {0, Sensitivity::Medium, 12.0f, 118, 80, 34}, {0, Sensitivity::Medium, -12.0f, 35, 77, 118},
+    {0, Sensitivity::Hard, 6.0f, 114, 92, 51},    {0, Sensitivity::Medium, 0.0f, 100, 128, 100},
+    {1, Sensitivity::Medium, 12.0f, 128, 87, 0},  {1, Sensitivity::Hard, -6.0f, 0, 128, 125},
+    {1, Sensitivity::Medium, 0.0f, 0, 128, 0},
 };
 const char* sensName(Sensitivity s) { return s == Sensitivity::Relaxed ? "Relaxed" : (s == Sensitivity::Medium ? "Medium" : "Hard"); }
 
@@ -481,37 +511,174 @@ void testColor() {
     Series s("color");
     for (const ColorCase& c : kColorCases) {
         fresh(c.s, 1, 5);  // 3 s history, no fade
+        gModel.setPalette(c.palette);
         feedNote(69, c.cents, 200, 20);  // 4 s: base 1, Relaxed display converged (1-e^-32)
         bool visited = false;
         const Rgb got = gModel.cellColor(69, gNow, &visited);
-        s.check(rgbNear(got, c.r, c.g, c.b, 1) && visited, "%s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) visited=%d", sensName(c.s),
-                (double)c.cents, got.r, got.g, got.b, c.r, c.g, c.b, (int)visited);
+        s.check(rgbNear(got, c.r, c.g, c.b, 1) && visited, "pal%d %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) visited=%d", c.palette,
+                sensName(c.s), (double)c.cents, got.r, got.g, got.b, c.r, c.g, c.b, (int)visited);
     }
     for (const ColorCase& c : kBlendCases) {
         fresh(c.s, 1, 5);
-        feedNote(69, c.cents, 10, 25);  // 250 ms voiced
+        gModel.setPalette(c.palette);
+        feedNote(69, c.cents, 5, 25);  // 125 ms voiced
         const Rgb got = gModel.cellColor(69, gNow, nullptr);
         const float disp = gModel.displayIntensity(69, gNow);
-        s.check(rgbNear(got, c.r, c.g, c.b, 1) && fabsf(disp - 0.5f) < 0.001f, "blend %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) display %.4f",
-                sensName(c.s), (double)c.cents, got.r, got.g, got.b, c.r, c.g, c.b, (double)disp);
+        s.check(rgbNear(got, c.r, c.g, c.b, 1) && fabsf(disp - 0.5f) < 0.001f, "blend pal%d %s %+.1fc got (%d,%d,%d) expected (%d,%d,%d) display %.4f",
+                c.palette, sensName(c.s), (double)c.cents, got.r, got.g, got.b, c.r, c.g, c.b, (double)disp);
     }
+    gModel.setPalette(0);
     // never-touched cell: black, not visited
     bool visited = true;
     const Rgb none = gModel.cellColor(70, gNow, &visited);
     s.check(none.r == 0 && none.g == 0 && none.b == 0 && !visited, "untouched cell black / unvisited");
-    // direct API
-    s.check(rgbNear(biasColor(Sensitivity::Medium, 0.0f), 34, 197, 94, 0), "biasColor centre");
-    s.check(rgbNear(biasColor(Sensitivity::Medium, 0.05f), 255, 170, 0, 0), "biasColor sharp");
-    s.check(rgbNear(biasColor(Sensitivity::Hard, -0.05f), 0, 86, 214, 0), "biasColor flat");
-    s.check(rgbNear(biasColor(Sensitivity::Relaxed, NAN), 34, 197, 94, 0), "biasColor NaN -> centre");
+    // direct API (biasColor = paletteColor(biasT))
+    s.check(rgbNear(biasColor(0, Sensitivity::Medium, 0.0f), 200, 255, 200, 0), "biasColor centre");
+    s.check(rgbNear(biasColor(0, Sensitivity::Medium, 0.05f), 255, 110, 0, 0), "biasColor sharp");
+    s.check(rgbNear(biasColor(0, Sensitivity::Hard, -0.05f), 0, 100, 255, 0), "biasColor flat");
+    s.check(rgbNear(biasColor(0, Sensitivity::Relaxed, NAN), 200, 255, 200, 0), "biasColor NaN -> centre");
+    s.check(rgbNear(biasColor(1, Sensitivity::Medium, 0.05f), 255, 0, 0, 0) && rgbNear(biasColor(1, Sensitivity::Hard, -0.05f), 0, 0, 255, 0),
+            "biasColor Classic sharp / flat");
     s.check(inDeadzone(Sensitivity::Medium, 0.0020f) && !inDeadzone(Sensitivity::Medium, 0.0022f), "deadzone Medium 0.21%%");
     s.check(inDeadzone(Sensitivity::Hard, 0.0010f) && !inDeadzone(Sensitivity::Hard, 0.0011f), "deadzone Hard 0.105%%");
     s.check(inDeadzone(Sensitivity::Relaxed, 0.0024f) && !inDeadzone(Sensitivity::Relaxed, 0.0026f), "deadzone Relaxed 0.25%%");
     s.check(!inDeadzone(Sensitivity::Medium, NAN), "deadzone NaN");
-    s.check(baseIntensity(0) == 0.0f && fabsf(baseIntensity(250) - 0.5f) < 1e-6f && baseIntensity(500) == 1.0f && baseIntensity(99999) == 1.0f,
-            "baseIntensity min(1, total/500)");
-    s.done("%u colour cases +-1, %u blend cases at display 0.5", (unsigned)(sizeof(kColorCases) / sizeof(kColorCases[0])),
+    s.check(baseIntensity(0) == 0.0f && fabsf(baseIntensity(125) - 0.5f) < 1e-6f && baseIntensity(250) == 1.0f && baseIntensity(99999) == 1.0f,
+            "baseIntensity min(1, total/250)");
+    s.done("%u colour cases +-1 (Safe + Classic), %u blend cases at display 0.5", (unsigned)(sizeof(kColorCases) / sizeof(kColorCases[0])),
            (unsigned)(sizeof(kBlendCases) / sizeof(kBlendCases[0])));
+}
+
+// ---- palettes, tendency, label colour ------------------------------------------------------------
+struct PalCase {
+    int palette;
+    float t;
+    uint8_t r, g, b;
+};
+// Exact: every t is a multiple of 0.25, so the float arithmetic is exact and the rounding (half away from
+// zero) can be checked with tolerance 0. Safe: centre (200,255,200) -> high (255,110,0) / low (0,100,255).
+// Classic: (0,255,0) -> (255,255,0) -> (255,0,0) and (0,255,0) -> (0,255,255) -> (0,0,255).
+const PalCase kPalCases[] = {
+    {0, -1.0f, 0, 100, 255},   {0, -0.75f, 50, 139, 241}, {0, -0.5f, 100, 178, 228}, {0, -0.25f, 150, 216, 214}, {0, 0.0f, 200, 255, 200},
+    {0, 0.25f, 214, 219, 150}, {0, 0.5f, 228, 183, 100},  {0, 0.75f, 241, 146, 50},  {0, 1.0f, 255, 110, 0},
+    {1, -1.0f, 0, 0, 255},     {1, -0.75f, 0, 128, 255},  {1, -0.5f, 0, 255, 255},   {1, -0.25f, 0, 255, 128},   {1, 0.0f, 0, 255, 0},
+    {1, 0.25f, 128, 255, 0},   {1, 0.5f, 255, 255, 0},    {1, 0.75f, 255, 128, 0},   {1, 1.0f, 255, 0, 0},
+};
+struct LabelCase {
+    Rgb c;
+    bool black;
+    const char* what;
+};
+const LabelCase kLabelCases[] = {
+    {{0, 0, 0}, false, "black cell"},
+    {{255, 255, 255}, true, "white"},
+    {{127, 127, 127}, false, "grey 127 (0.498)"},
+    {{128, 128, 128}, true, "grey 128 (0.502)"},
+    {{200, 255, 200}, true, "Safe centre"},
+    {{255, 110, 0}, true, "Safe high (0.521)"},
+    {{0, 100, 255}, false, "Safe low"},
+    {{90, 115, 90}, false, "Safe centre faded to 0.45"},
+    {{110, 140, 110}, true, "Safe centre at 0.55"},
+    {{0, 255, 0}, true, "Classic centre"},
+    {{255, 255, 0}, true, "Classic yellow"},
+    {{0, 255, 255}, true, "Classic cyan"},
+    {{255, 0, 0}, false, "Classic red"},
+    {{0, 0, 255}, false, "Classic blue"},
+};
+
+void testPalette() {
+    Series s("palette/biasT/label");
+    // paletteColor at t = -1, -0.75, -0.5, -0.25, 0, +0.25, +0.5, +0.75, +1 for both palettes
+    for (const PalCase& c : kPalCases) {
+        const Rgb got = paletteColor(c.palette, c.t);
+        s.check(rgbNear(got, c.r, c.g, c.b, 0), "palette %d t=%+.2f got (%d,%d,%d) expected (%d,%d,%d)", c.palette, (double)c.t, got.r, got.g, got.b,
+                c.r, c.g, c.b);
+    }
+    // clamping, NaN, unknown palette index
+    s.check(rgbNear(paletteColor(0, 7.5f), 255, 110, 0, 0) && rgbNear(paletteColor(0, -7.5f), 0, 100, 255, 0), "Safe t clamps to +-1");
+    s.check(rgbNear(paletteColor(1, 7.5f), 255, 0, 0, 0) && rgbNear(paletteColor(1, -7.5f), 0, 0, 255, 0), "Classic t clamps to +-1");
+    s.check(rgbNear(paletteColor(0, NAN), 200, 255, 200, 0) && rgbNear(paletteColor(1, NAN), 0, 255, 0, 0), "NaN t -> centre");
+    s.check(rgbNear(paletteColor(9, 1.0f), 255, 110, 0, 0) && rgbNear(paletteColor(-1, -1.0f), 0, 100, 255, 0), "unknown palette index -> Safe");
+    // greyscale / protanopia argument for Safe: luminance strictly decreasing from the centre to either end
+    // (so centre > high > low), sampled every 0.05 in t
+    {
+        bool mono = true;
+        float prevHi = relLuminance(paletteColor(0, 0.0f)), prevLo = prevHi;
+        for (int i = 1; i <= 20; ++i) {
+            const float hi = relLuminance(paletteColor(0, 0.05f * (float)i));
+            const float lo = relLuminance(paletteColor(0, -0.05f * (float)i));
+            if (!(hi < prevHi) || !(lo < prevLo)) mono = false;
+            prevHi = hi;
+            prevLo = lo;
+        }
+        s.check(mono, "Safe luminance strictly decreasing from the centre to both ends");
+        const float lc = relLuminance(kSafeCentre), lh = relLuminance(kSafeHigh), ll = relLuminance(kSafeLow);
+        s.check(lc > lh && lh > ll, "Safe luminance centre %.3f > high %.3f > low %.3f", (double)lc, (double)lh, (double)ll);
+    }
+
+    // biasT: signed, limits, NaN
+    const float rMed = 0.006f, rRel = 0.0071428571f, rHard = 0.0035f;  // |e'| = dz*(1 + span/2): t = +-0.5
+    s.check(biasT(Sensitivity::Medium, 0.0f) == 0.0f && biasT(Sensitivity::Medium, 0.0020f) == 0.0f && biasT(Sensitivity::Medium, -0.0020f) == 0.0f,
+            "biasT inside the dead zone is 0");
+    s.check(fabsf(biasT(Sensitivity::Medium, rMed) - 0.5f) < 1e-4f && fabsf(biasT(Sensitivity::Medium, -rMed) + 0.5f) < 1e-4f,
+            "biasT Medium +-0.5: %.5f / %.5f", (double)biasT(Sensitivity::Medium, rMed), (double)biasT(Sensitivity::Medium, -rMed));
+    s.check(fabsf(biasT(Sensitivity::Relaxed, rRel) - 0.5f) < 1e-4f && fabsf(biasT(Sensitivity::Relaxed, -rRel) + 0.5f) < 1e-4f, "biasT Relaxed +-0.5");
+    s.check(fabsf(biasT(Sensitivity::Hard, rHard) - 0.5f) < 1e-4f && fabsf(biasT(Sensitivity::Hard, -rHard) + 0.5f) < 1e-4f, "biasT Hard +-0.5");
+    for (int i = 0; i < 3; ++i) {
+        const Sensitivity sv = (Sensitivity)i;
+        s.check(biasT(sv, 0.05f) == 1.0f && biasT(sv, -0.05f) == -1.0f, "%s biasT limits +-1", sensName(sv));
+        s.check(biasT(sv, NAN) == 0.0f, "%s biasT NaN -> 0", sensName(sv));
+        s.check(biasT(sv, INFINITY) == 1.0f && biasT(sv, -INFINITY) == -1.0f, "%s biasT +-inf -> +-1", sensName(sv));
+    }
+    // ramp thresholds in cents (pure centre up to / full colour from): Relaxed 6.17 / 18.45, Medium 5.19 / 15.51, Hard 2.02 / 10.07
+    {
+        const double pure[3] = {6.172, 5.186, 2.019}, sat[3] = {18.450, 15.511, 10.070};
+        for (int i = 0; i < 3; ++i) {
+            const Sensitivity sv = (Sensitivity)i;
+            const float lo = biasT(sv, (float)ratioOf(pure[i] - 0.02)), lo2 = biasT(sv, (float)ratioOf(pure[i] + 0.02));
+            const float hi = biasT(sv, (float)ratioOf(sat[i] - 0.02)), hi2 = biasT(sv, (float)ratioOf(sat[i] + 0.02));
+            s.check(lo == 0.0f && lo2 > 0.0f && lo2 < 0.01f, "%s starts at %.2f c: %.5f / %.5f", sensName(sv), pure[i], (double)lo, (double)lo2);
+            s.check(hi > 0.99f && hi < 0.9999f && hi2 == 1.0f, "%s saturates at %.2f c: %.5f / %.5f", sensName(sv), sat[i], (double)hi, (double)hi2);
+        }
+    }
+
+    // label colour rule: black text above 0.5 relative luminance, white below
+    s.check(relLuminance(Rgb{0, 0, 0}) == 0.0f && fabsf(relLuminance(Rgb{255, 255, 255}) - 1.0f) < 1e-5f && fabsf(relLuminance(Rgb{255, 0, 0}) - 0.2126f) < 1e-5f &&
+                fabsf(relLuminance(Rgb{0, 255, 0}) - 0.7152f) < 1e-5f && fabsf(relLuminance(Rgb{0, 0, 255}) - 0.0722f) < 1e-5f,
+            "relLuminance weights");
+    for (const LabelCase& l : kLabelCases) s.check(useBlackLabel(l.c) == l.black, "label on %s expected %s", l.what, l.black ? "black" : "white");
+
+    // Model: the palette only changes how the colour is computed
+    fresh(Sensitivity::Medium, 1, 0);  // hold 5 s
+    feedNote(69, 12.0, 25, 20);        // base 1
+    const uint32_t t0 = gNow;
+    s.check(gModel.palette() == 0, "fresh() leaves palette 0");
+    s.check(rgbNear(gModel.cellColor(69, t0, nullptr), 236, 159, 68, 1), "Safe +12 c Medium");
+    gModel.setPalette(1);
+    s.check(gModel.palette() == 1 && rgbNear(gModel.cellColor(69, t0, nullptr), 255, 174, 0, 1), "Classic +12 c Medium");
+    gModel.setPalette(5);
+    s.check(gModel.palette() == 1, "setPalette(5) clamps to 1");
+    gModel.setPalette(-4);
+    s.check(gModel.palette() == 0, "setPalette(-4) clamps to 0");
+    // switching at +7.5 s (inside the fade ramp, display 1 - 0.55*0.25 = 0.8625): colours change, intensity and timers do not
+    const float d1 = gModel.displayIntensity(69, t0 + 7500);
+    s.check(fabsf(d1 - 0.8625f) < 1e-4f, "display +7.5 s = %.4f", (double)d1);
+    s.check(rgbNear(gModel.cellColor(69, t0 + 7500, nullptr), 204, 137, 59, 1), "Safe at 0.8625");
+    gModel.setPalette(1);
+    s.check(gModel.displayIntensity(69, t0 + 7500) == d1, "setPalette keeps the display intensity");
+    s.check(rgbNear(gModel.cellColor(69, t0 + 7500, nullptr), 220, 150, 0, 1), "Classic at 0.8625");
+    s.check(fabsf(gModel.displayIntensity(69, t0 + 15000) - 0.45f) < 1e-4f, "setPalette did not restart the fade timer: +15 s = %.4f",
+            (double)gModel.displayIntensity(69, t0 + 15000));
+    s.check(rgbNear(gModel.cellColor(69, t0 + 20000, nullptr), 115, 78, 0, 1), "Classic faded to 0.45: round(0.45*(255,174,0))");
+    gModel.setPalette(0);
+    s.check(rgbNear(gModel.cellColor(69, t0 + 20000, nullptr), 106, 72, 31, 1), "Safe faded to 0.45: round(0.45*(236,159,68))");
+    // reset() keeps the palette like the other settings
+    gModel.setPalette(1);
+    gModel.reset(gNow);
+    s.check(gModel.palette() == 1, "reset keeps the palette");
+    gModel.setPalette(0);
+    s.done("%u palette points exact (t -1..+1), biasT limits / NaN / thresholds, luminance rule, palette switch keeps intensity and timers",
+           (unsigned)(sizeof(kPalCases) / sizeof(kPalCases[0])));
 }
 
 // ---- needle smoothing / tick flags -----------------------------------------------------------
@@ -618,16 +785,16 @@ void testHistory() {
 // ---- fade ---------------------------------------------------------------------------------
 double fadeExpect(double d, double base, double holdMs, double el) {
     if (el <= holdMs) return d;
-    const double target = 0.25 * base;
+    const double target = 0.45 * base;
     if (el - holdMs >= 10000.0) return d < target ? d : target;
     return d + (target - d) * (el - holdMs) / 10000.0;
 }
 
 void testFade() {
     Series s("fade");
-    // Medium, hold 5 s, base = 1: 1.0 up to the hold, linear ramp over 10 s to 0.25, then stays.
+    // Medium, hold 5 s, base = 1: 1.0 up to the hold, linear ramp over 10 s to 0.45, then stays.
     fresh(Sensitivity::Medium, 1, 0);
-    feedNote(69, 5.0, 25, 20);  // 500 ms of voice -> base 1
+    feedNote(69, 5.0, 25, 20);  // 500 ms of voice -> base 1 (full from 250 ms)
     const uint32_t t0 = gNow;
     const uint32_t offs[] = {0, 4000, 5000, 7500, 10000, 15000, 20000, 200000};
     for (uint32_t o : offs) {
@@ -637,18 +804,25 @@ void testFade() {
     }
     {
         bool v = false;
-        const Rgb c = gModel.cellColor(69, t0 + 20000, &v);  // colour of a faded cell: centre*0.25
-        s.check(rgbNear(c, 9, 49, 24, 1) && v, "faded colour (%d,%d,%d) expected (9,49,24)", c.r, c.g, c.b);  // round(0.25*(34,197,94)) = (9,49,24)
+        const Rgb c = gModel.cellColor(69, t0 + 20000, &v);  // colour of a faded cell: Safe centre*0.45
+        s.check(rgbNear(c, 90, 115, 90, 1) && v, "faded colour (%d,%d,%d) expected (90,115,90)", c.r, c.g, c.b);  // round(0.45*(200,255,200)) = (90,115,90)
     }
-    // base 0.5 (250 ms voiced): target 0.125
+    // base 0.5 (125 ms voiced): target 0.225
     fresh(Sensitivity::Medium, 1, 0);
-    feedNote(69, 5.0, 10, 25);
+    feedNote(69, 5.0, 5, 25);
     const uint32_t t1 = gNow;
     for (uint32_t o : {uint32_t(4000), uint32_t(10000), uint32_t(20000)}) {
         const double e = fadeExpect(0.5, 0.5, 5000.0, (double)o);
         const float g = gModel.displayIntensity(69, t1 + o);
         s.check(fabs((double)g - e) < 1e-4, "base .5 hold 5s +%us got %.4f expected %.4f", (unsigned)o, (double)g, e);
     }
+    // FULL_CONF 250 ms: 125 ms -> 0.5, 250 ms -> 1.0 (Medium: display = base at once)
+    fresh(Sensitivity::Medium, 1, 5);
+    feedNote(69, 5.0, 5, 25);
+    s.check(fabsf(gModel.displayIntensity(69, gNow) - 0.5f) < 1e-6f, "125 ms -> display 0.5 (%.4f)", (double)gModel.displayIntensity(69, gNow));
+    feedNote(69, 5.0, 5, 25);
+    s.check(fabsf(gModel.displayIntensity(69, gNow) - 1.0f) < 1e-6f && gModel.totalMs(69) == 250, "250 ms -> display 1.0 (%.4f, total %u)",
+            (double)gModel.displayIntensity(69, gNow), (unsigned)gModel.totalMs(69));
     // no fade: stays at 1.0 for ever; 2 min hold
     fresh(Sensitivity::Medium, 1, 5);
     feedNote(69, 5.0, 25, 20);
@@ -657,7 +831,7 @@ void testFade() {
     fresh(Sensitivity::Medium, 1, 3);
     feedNote(69, 5.0, 25, 20);
     s.check(fabsf(gModel.displayIntensity(69, gNow + 100000u) - 1.0f) < 1e-6f, "hold 2 min at +100 s");
-    s.check(fabsf(gModel.displayIntensity(69, gNow + 125000u) - 0.625f) < 1e-4f, "hold 2 min at +125 s: %.4f", (double)gModel.displayIntensity(69, gNow + 125000u));
+    s.check(fabsf(gModel.displayIntensity(69, gNow + 125000u) - 0.725f) < 1e-4f, "hold 2 min at +125 s: %.4f", (double)gModel.displayIntensity(69, gNow + 125000u));
     // anyFading window (hold 5 s)
     fresh(Sensitivity::Medium, 1, 0);
     feedNote(69, 5.0, 25, 20);
@@ -667,16 +841,16 @@ void testFade() {
     s.check(gModel.anyFading(t2 + 15300), "anyFading just after the ramp (settle)");
     s.check(!gModel.anyFading(t2 + 16000), "anyFading after settle");
     // setHold does not restart the timer; the other setters do
-    s.check(fabs((double)gModel.displayIntensity(69, t2 + 12000) - 0.475) < 1e-4, "mid-ramp +12 s = 0.475 (%.4f)", (double)gModel.displayIntensity(69, t2 + 12000));
+    s.check(fabs((double)gModel.displayIntensity(69, t2 + 12000) - 0.615) < 1e-4, "mid-ramp +12 s = 0.615 (%.4f)", (double)gModel.displayIntensity(69, t2 + 12000));
     gModel.setHold(2, t2 + 12000);  // 30 s: Medium display back to base at once, same stain time
     s.check(fabs((double)gModel.displayIntensity(69, t2 + 12000) - 1.0) < 1e-4, "setHold: back to 1.0 (%.4f)", (double)gModel.displayIntensity(69, t2 + 12000));
-    s.check(fabs((double)gModel.displayIntensity(69, t2 + 35000) - fadeExpect(1.0, 1.0, 30000.0, 35000.0)) < 1e-4, "setHold: no restart, +35 s = 0.625 (%.4f)",
+    s.check(fabs((double)gModel.displayIntensity(69, t2 + 35000) - fadeExpect(1.0, 1.0, 30000.0, 35000.0)) < 1e-4, "setHold: no restart, +35 s = 0.725 (%.4f)",
             (double)gModel.displayIntensity(69, t2 + 35000));
     gModel.setHold(0, t2 + 12000);
     gModel.setHistory(2, t2 + 12000);  // recompute: timers restart at +12 s
     s.check(fabs((double)gModel.displayIntensity(69, t2 + 12000) - 1.0) < 1e-4, "setHistory: jumps to 1.0");
     s.check(fabs((double)gModel.displayIntensity(69, t2 + 16000) - 1.0) < 1e-4, "setHistory: hold restarted (+4 s)");
-    s.check(fabs((double)gModel.displayIntensity(69, t2 + 22000) - 0.625) < 1e-4, "setHistory: ramp restarted (+10 s) %.4f", (double)gModel.displayIntensity(69, t2 + 22000));
+    s.check(fabs((double)gModel.displayIntensity(69, t2 + 22000) - 0.725) < 1e-4, "setHistory: ramp restarted (+10 s) %.4f", (double)gModel.displayIntensity(69, t2 + 22000));
     gModel.setRefA(440.0f, t2 + 30000);
     s.check(fabs((double)gModel.displayIntensity(69, t2 + 30000) - 1.0) < 1e-4, "setRefA restarts the timer");
 
@@ -688,7 +862,7 @@ void testFade() {
     char detail[100] = "";
     for (int k = 1; k <= 25; ++k) {
         frame(69, 5.0, 20, 440.0);
-        const double base = fmin(1.0, 20.0 * k / 500.0);
+        const double base = fmin(1.0, 20.0 * k / 250.0);
         d += (base - d) * alpha;
         if (k == 1 || k == 5 || k == 12 || k == 25) {
             const float g = gModel.displayIntensity(69, gNow);
@@ -700,19 +874,19 @@ void testFade() {
     // fade of the stored (EMA) value with hold 5 s
     s.check(fabs((double)gModel.displayIntensity(69, t3 + 10000) - fadeExpect(d, 1.0, 5000.0, 10000.0)) < 2e-4, "Relaxed fade +10 s %.4f",
             (double)gModel.displayIntensity(69, t3 + 10000));
-    s.check(fabs((double)gModel.displayIntensity(69, t3 + 20000) - 0.25) < 2e-4, "Relaxed faded to 0.25");
-    // a new stain after the fade starts from the faded value (materialised): 0.25 + 0.75*alpha
+    s.check(fabs((double)gModel.displayIntensity(69, t3 + 20000) - 0.45) < 2e-4, "Relaxed faded to 0.45");
+    // a new stain after the fade starts from the faded value (materialised): 0.45 + 0.55*alpha
     gNow = t3 + 20000;
     gModel.tick(true, (float)hzFor(69, 5.0, 440.0), 20, gNow);
     ++gTicks;
-    const double e2 = 0.25 + (1.0 - 0.25) * alpha;
-    s.check(fabs((double)gModel.displayIntensity(69, gNow) - e2) < 2e-4, "Relaxed restain from 0.25: got %.5f expected %.5f", (double)gModel.displayIntensity(69, gNow), e2);
+    const double e2 = 0.45 + (1.0 - 0.45) * alpha;
+    s.check(fabs((double)gModel.displayIntensity(69, gNow) - e2) < 2e-4, "Relaxed restain from 0.45: got %.5f expected %.5f", (double)gModel.displayIntensity(69, gNow), e2);
     // Medium / Hard have no fade-in: display = base at the first stained frame
     fresh(Sensitivity::Hard, 1, 5);
     frame(69, 5.0, 25, 440.0);
-    frame(69, 5.0, 25, 440.0);  // 25 ms voiced -> base 0.05
-    s.check(fabs((double)gModel.displayIntensity(69, gNow) - 0.05) < 1e-4, "Hard display = base immediately (%.4f)", (double)gModel.displayIntensity(69, gNow));
-    s.done("hold 5 s / 2 min / none, base 0.5, setHold vs recompute timers, anyFading, %s", detail);
+    frame(69, 5.0, 25, 440.0);  // 25 ms voiced -> base 0.1
+    s.check(fabs((double)gModel.displayIntensity(69, gNow) - 0.1) < 1e-4, "Hard display = base immediately (%.4f)", (double)gModel.displayIntensity(69, gNow));
+    s.done("hold 5 s / 2 min / none, floor 0.45, base 0.5 / FULL_CONF 250 ms, setHold vs recompute timers, anyFading, %s", detail);
 }
 
 // ---- re-basing of A4 ----------------------------------------------------------------------
@@ -800,10 +974,10 @@ void testRebase() {
 void testTranspose() {
     Series s("transposition");
     fresh(Sensitivity::Medium, 1, 5);
-    feedNote(69, 15.6, 100, 20);  // concert A4, played 15.6 c sharp
+    feedNote(69, 12.0, 100, 20);  // concert A4, played 12 c sharp
     bool v = false;
     const Rgb c0 = gModel.cellColor(69, gNow, &v);
-    s.check(rgbNear(c0, 145, 183, 47, 1) && v, "C: A4 cell (%d,%d,%d) expected (145,183,47)", c0.r, c0.g, c0.b);
+    s.check(rgbNear(c0, 236, 159, 68, 1) && v, "C: A4 cell (%d,%d,%d) expected (236,159,68)", c0.r, c0.g, c0.b);
     const int8_t semis[3] = {-2, 3, 5};
     const int written[3] = {71, 66, 64};  // Bb, Eb, F: written = concert - t
     const char* nm[3] = {"Bb", "Eb", "F"};
@@ -812,7 +986,7 @@ void testTranspose() {
         s.check(gModel.activeConcertMidi() == -1, "%s: setTransposition ends the active note", nm[i]);
         bool vis = false;
         const Rgb c = gModel.cellColor(written[i], gNow, &vis);
-        s.check(rgbNear(c, 145, 183, 47, 1) && vis, "%s: concert A4 at written %d: (%d,%d,%d)", nm[i], written[i], c.r, c.g, c.b);
+        s.check(rgbNear(c, 236, 159, 68, 1) && vis, "%s: concert A4 at written %d: (%d,%d,%d)", nm[i], written[i], c.r, c.g, c.b);
         bool vis69 = true;
         const Rgb old = gModel.cellColor(69, gNow, &vis69);
         s.check(old.r == 0 && old.g == 0 && old.b == 0 && !vis69, "%s: old cell 69 is empty", nm[i]);
@@ -1092,6 +1266,7 @@ void runModelTests() {
     testBudget();
     testParity();
     testColor();
+    testPalette();
     testNeedle();
     testHistory();
     testFade();

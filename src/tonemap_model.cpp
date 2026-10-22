@@ -8,10 +8,11 @@
 
 namespace tonemap {
 
+// spanMul is 2 / 2 / 4 (tonemap.live: 4 / 4 / 8): deliberate deviation, narrower ramp = bolder colours.
 const SensConst kSens[3] = {
-    {0.0025f, 0.7f, 4.0f, 350.0f},    // Relaxed
-    {0.0021f, 0.7f, 4.0f, 80.0f},     // Medium
-    {0.00105f, 0.9f, 8.0f, 30.0f},    // Hard
+    {0.0025f, 0.7f, 2.0f, 350.0f},    // Relaxed
+    {0.0021f, 0.7f, 2.0f, 80.0f},     // Medium
+    {0.00105f, 0.9f, 4.0f, 30.0f},    // Hard
 };
 
 namespace {
@@ -35,20 +36,30 @@ struct RgbF {
     float r, g, b;
 };
 
-// ToneMap bias*(): centre colour inside the deadzone, else a linear blend towards sharp / flat.
-RgbF biasF(Sensitivity s, float avgErrRatio) {
-    const SensConst& c = kSens[(int)s];
-    const float scaled = avgErrRatio * c.errScale;
-    const float a = fabsf(scaled);
-    RgbF out = {(float)kCenter.r, (float)kCenter.g, (float)kCenter.b};
-    if (!(a > c.deadzone)) return out;  // NaN -> centre
-    const float span = c.spanMul * c.deadzone;
-    const float t = clampf((a - c.deadzone) / span, 0.0f, 1.0f);
-    const Rgb& to = scaled > 0.0f ? kHigh : kLow;
-    out.r += ((float)to.r - out.r) * t;
-    out.g += ((float)to.g - out.g) * t;
-    out.b += ((float)to.b - out.b) * t;
-    return out;
+inline RgbF toF(const Rgb& c) { return {(float)c.r, (float)c.g, (float)c.b}; }
+
+// from + (to - from) * u, per channel
+inline RgbF lerpRgb(const Rgb& from, const Rgb& to, float u) {
+    RgbF o = toF(from);
+    o.r += ((float)to.r - o.r) * u;
+    o.g += ((float)to.g - o.g) * u;
+    o.b += ((float)to.b - o.b) * u;
+    return o;
+}
+
+// Palette colour at tendency t (clamped to [-1, +1]), full intensity.
+RgbF paletteF(int palette, float t) {
+    if (!(t == t)) t = 0.0f;
+    t = clampf(t, -1.0f, 1.0f);
+    if (palette == 1) {  // Classic: green -> yellow -> red / green -> cyan -> blue
+        const float a = t < 0.0f ? -t : t;  // distance from the centre, 0..1
+        const bool high = t >= 0.0f;
+        const Rgb& mid = high ? kClassicHighMid : kClassicLowMid;
+        const Rgb& end = high ? kClassicHigh : kClassicLow;
+        return a <= 0.5f ? lerpRgb(kClassicCentre, mid, a * 2.0f) : lerpRgb(mid, end, (a - 0.5f) * 2.0f);
+    }
+    // Safe (default): centre -> high / centre -> low, linear in RGB.
+    return t >= 0.0f ? lerpRgb(kSafeCentre, kSafeHigh, t) : lerpRgb(kSafeCentre, kSafeLow, -t);
 }
 
 inline uint8_t toByte(float v) {
@@ -106,11 +117,29 @@ float needlePct(float cents) {
     return (clampf(cents, -50.0f, 50.0f) + 50.0f) / 100.0f;
 }
 
-Rgb biasColor(Sensitivity s, float avgErrRatio) {
-    const RgbF f = biasF(s, avgErrRatio);
+// ToneMap bias*(): signed ramp position. 0 inside the deadzone (and for NaN), else a linear ramp up to
+// +-1 over spanMul * deadzone. + = sharp (high), - = flat (low).
+float biasT(Sensitivity s, float avgErrRatio) {
+    const SensConst& c = kSens[(int)s];
+    const float scaled = avgErrRatio * c.errScale;
+    const float a = fabsf(scaled);
+    if (!(a > c.deadzone)) return 0.0f;  // NaN -> centre
+    const float span = c.spanMul * c.deadzone;
+    const float t = clampf((a - c.deadzone) / span, 0.0f, 1.0f);
+    return scaled > 0.0f ? t : -t;
+}
+
+Rgb paletteColor(int palette, float t) {
+    const RgbF f = paletteF(palette, t);
     Rgb o = {toByte(f.r), toByte(f.g), toByte(f.b)};
     return o;
 }
+
+Rgb biasColor(int palette, Sensitivity s, float avgErrRatio) { return paletteColor(palette, biasT(s, avgErrRatio)); }
+
+float relLuminance(Rgb c) { return (0.2126f * (float)c.r + 0.7152f * (float)c.g + 0.0722f * (float)c.b) / 255.0f; }
+
+bool useBlackLabel(Rgb displayed) { return relLuminance(displayed) > 0.5f; }
 
 bool inDeadzone(Sensitivity s, float errRatio) { return fabsf(errRatio) <= kSens[(int)s].deadzone; }
 
@@ -131,7 +160,7 @@ void Model::reset(uint32_t /*nowMs*/) {
 
 // Lazy display intensity of a note (ToneMap updateCellDisplayColor, evaluated on demand).
 // Medium / Hard: display = base. Relaxed: the stored value (EMA towards base only on stain frames).
-// After `hold` since the last stain, a linear 10 s ramp from the stored value to 0.25*base;
+// After `hold` since the last stain, a linear 10 s ramp from the stored value to 0.45*base;
 // it stays there. No fade (hold < 0): no ramp. Never stained or base == 0: 0.
 float Model::evalDisplay(const NoteState& s, uint32_t nowMs) const {
     if (!(s.flags & kFlagEverStained)) return 0.0f;
@@ -207,6 +236,12 @@ void Model::setHold(int idx, uint32_t nowMs) {
     if (idx > 5) idx = 5;
     materialiseAll(nowMs);  // no restartTimers: the hold clock keeps running
     holdIdx_ = (uint8_t)idx;
+}
+
+void Model::setPalette(int idx) {
+    if (idx < 0) idx = 0;
+    if (idx > kPaletteCount - 1) idx = kPaletteCount - 1;
+    palette_ = (uint8_t)idx;  // colours are computed on demand: nothing to materialise or restart
 }
 
 void Model::endNote() {
@@ -431,7 +466,7 @@ Rgb Model::cellColor(int writtenMidi, uint32_t nowMs, bool* visited) const {
     if (visited) *visited = (s.flags & kFlagVisited) != 0;
     const float display = evalDisplay(s, nowMs);
     if (display <= 0.001f) return black;
-    const RgbF bias = biasF(sens_, avgErrRatio(concert));
+    const RgbF bias = paletteF(palette_, biasT(sens_, avgErrRatio(concert)));
     // lerp(background = black, bias, display), rounded per channel
     Rgb o = {toByte(bias.r * display), toByte(bias.g * display), toByte(bias.b * display)};
     return o;

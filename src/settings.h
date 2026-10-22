@@ -19,6 +19,7 @@ struct Settings {
     int tmTransp = 0;        // transposition in semitones: 0 (C), -2 (Bb), 3 (Eb), 5 (F)
     int tmFlats = 0;         // 0 sharps, 1 flats
     int tmLed = 1;           // in-tune LED on/off
+    int tmPalette = 0;       // heat-map colours: 0 safe (blue-white-orange), 1 classic (green-yellow-red / cyan-blue)
 };
 
 namespace settings {

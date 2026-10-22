@@ -187,11 +187,11 @@ constexpr int kNoteCount = 128;              // indexed by CONCERT midi, 0..127
 constexpr int kGridLo = 36, kGridHi = 107;   // WRITTEN midi shown (C2..B7)
 enum class Sensitivity : uint8_t { Relaxed, Medium, Hard };
 struct SensConst { float deadzone, errScale, spanMul, needleTauMs; };
-extern const SensConst kSens[3];             // {0.0025,0.7,4,350} {0.0021,0.7,4,80} {0.00105,0.9,8,30}
+extern const SensConst kSens[3];             // {0.0025,0.7,4,350} {0.0021,0.7,4,80} {0.00105,0.9,8,30}  (2026-10-22: spanMul 2/2/4, ver §13)
 constexpr uint32_t kHistoryMs[4]  = {1000, 3000, 30000, 0};            // 0 = unlimited
 constexpr int32_t  kHoldMs[6]     = {5000, 15000, 30000, 120000, 300000, -1};  // -1 = no fade
 constexpr int8_t   kTransposeSemis[4] = {0, -2, 3, 5};
-struct Rgb { uint8_t r, g, b; };             // kHigh{255,170,0} kCenter{34,197,94} kLow{0,86,214}
+struct Rgb { uint8_t r, g, b; };             // (2026-10-22: paletas Safe / Classic en lugar de kHigh/kCenter/kLow, ver §13)
 
 // The single place a temperament would plug in.
 float latticeOffsetCents(int concertMidi);                       // 0 in v1
@@ -200,9 +200,9 @@ float targetHz(int concertMidi, float a4);                       // 440*2^((m-69
 struct NoteHit { int concertMidi; float cents, errRatio, targetHz; };
 NoteHit freqToNote(float hz, float a4);       // ±2 candidates around round(); minimise |(pos-cand)*100 - off|; ties -> lower
 float   needlePct(float cents);               // (clamp(c,-50,50)+50)/100
-Rgb     biasColor(Sensitivity s, float avgErrRatio);
+Rgb     biasColor(Sensitivity s, float avgErrRatio);  // 2026-10-22: biasT + paletteColor + setPalette, ver §13
 bool    inDeadzone(Sensitivity s, float errRatio);
-float   baseIntensity(uint32_t totalMs);      // min(1, total/500)
+float   baseIntensity(uint32_t totalMs);      // min(1, total/500)  (2026-10-22: total/250, ver §13)
 
 struct TickResult { bool hasNote, newNote; int concertMidi, writtenMidi; float hz, cents, displayCents, errRatio; bool inDeadzone; };
 
@@ -301,7 +301,7 @@ offset size field
   La evaluación del desvanecido es perezosa y determinista, pero el valor se materializa en `displayI` antes de
   cualquier tinte, recálculo o reset (ToneMap lo reescribe cada frame).
   Medium/Hard: `display = base`. Relaxed: EMA hacia base solo en el frame de tinte.
-  Desvanecido: pasado `hold`, rampa lineal de 10 s desde el ancla hasta `0,25·base`, y se queda; no fade = sin rampa.
+  Desvanecido: pasado `hold`, rampa lineal de 10 s desde el ancla hasta `0,25·base` (desde 2026-10-22 `0,45·base`, ver §13), y se queda; no fade = sin rampa.
   `base = 0` o nunca teñida → `display = 0`.
 
 ### 5.4 Re-basado de A4 y transposición
@@ -392,8 +392,9 @@ int tmGate   = 1;      // 0 none 1 low 2 med 3 high
 int tmTransp = 0;      // semitones: 0, -2, 3, 5
 int tmFlats  = 0;
 int tmLed    = 1;
+int tmPalette = 0;   // 2026-10-22: 0 safe, 1 classic (ver §13)
 ```
-Claves NVS: `tunerView`, `tmSens`, `tmHist`, `tmHold`, `tmGate`, `tmTransp`, `tmFlats`, `tmLed` (≤ 15 car.).
+Claves NVS: `tunerView`, `tmSens`, `tmHist`, `tmHold`, `tmGate`, `tmTransp`, `tmFlats`, `tmLed`, y desde 2026-10-22 `tmPal` (≤ 15 car.).
 `clampAll`: `constrain` de cada una; `tmTransp` se fuerza a 0 si no está en {0, −2, 3, 5} (guardar semitonos hace
 trivial añadir A (−3)). `load()`: `getInt` con el valor actual como defecto. `tick()`: `putInt`. Se amplía la línea
 serie de ajustes cargados. Guardado diferido sin cambios; `touch()` en cada cambio.
@@ -465,6 +466,7 @@ el on/off del drone; cuesta ~300 ms al pulsar `T`.
 | `K` | rota transposición; `model.setTransposition`; mensaje |
 | `F` | alterna `tmFlats`; mensaje |
 | `L` | alterna `tmLed`; brillo/LED como arriba; mensaje |
+| `P` | (2026-10-22) alterna `tmPalette`; `model.setPalette`; mensaje `Palette: Safe` / `Palette: Classic` |
 | `R` | `model.reset`; mensaje |
 | `Space` | pausa/reanuda (el reloj del mapa se para) |
 | Arriba/Abajo | `refA ± 1` (400..480); `model.setRefA` |
@@ -665,3 +667,77 @@ repite el detector offline en Python (`mpm_off.py`, misma NSDF y máquina de má
 - **Cuerdas al aire (K híbrido):** C3 +4 c, G3 +3 c, D4 +9 c, A4 +7 c respecto a A=440 (A=442 ≈ +8 c): afinación
   estable, desviaciones de ±1–2 c durante la nota sostenida (claridad 1,00).
 - Pendiente: confirmarlo en vivo con la vista ToneMap (PARADA B) y, si hace falta, otro valor de `kLowFreqHz` para flauta.
+
+## 13. Cambios tras pruebas en dispositivo (2026-10-22)
+
+Sergio usó la vista en el Cardputer ADV (fases 0-5 hechas y probadas) y pidió cuatro cambios. Varios son
+**desviaciones deliberadas de tonemap.live** para que el mapa se vea mejor de un vistazo; están marcadas así en los
+comentarios del código (`tonemap_model.h/.cpp`).
+
+### 13.1 Marcador de la celda activa
+
+El borde blanco interior de 2 px tapaba demasiado de la celda de 20 × 18 px. Ahora son **cuatro esquinas en L**
+(`kBracketArm` = 5 px, `kBracketThick` = 2 px, dibujadas en `drawCorner`), en **negro o blanco según la luminancia
+relativa del color que muestra la celda** (misma regla que la etiqueta). 2 px de grosor y 5 de brazo no pisan la
+etiqueta (que empieza en x+2, y+2). Se dibujan antes que la línea de referencia negra y la aguja, que no cambian.
+
+### 13.2 Paletas y daltonismo
+
+El modelo sigue calculando la tendencia como antes, pero ahora la expone como `float biasT(Sensitivity, avgErrRatio)`:
+`t` con signo en [−1, +1] (+ = alto), 0 dentro de la zona muerta o con NaN. `Rgb paletteColor(int palette, float t)`
+la convierte en color; `Model::setPalette(int)` guarda la paleta (0 Safe, 1 Classic; fuera de rango se recorta) y
+`cellColor` la usa. Cambiar de paleta solo exige redibujar: no toca datos ni temporizadores (`setPalette` no lleva
+`nowMs`). `biasColor(palette, s, avgErrRatio)` queda como atajo `paletteColor(palette, biasT(...))`.
+
+| t | Safe (0) | Classic (1) |
+|---|---|---|
+| −1 | (0, 100, 255) | (0, 0, 255) |
+| −0,5 | (100, 178, 228) | (0, 255, 255) |
+| 0 | (200, 255, 200) | (0, 255, 0) |
+| +0,5 | (228, 183, 100) | (255, 255, 0) |
+| +1 | (255, 110, 0) | (255, 0, 0) |
+
+- **Safe:** azul – casi blanco – naranja, interpolación lineal en RGB centro→alto y centro→bajo. El eje azul/naranja
+  se conserva en protanopía y deuteranopía (que confunden rojo y verde), y para tritanopía (azul-amarillo) cuenta
+  sobre todo la luminancia. Además la **luminancia está ordenada estrictamente** centro (0,94) >
+  alto (0,52) > bajo (0,35) (luminancia relativa sobre los canales codificados, pesos Rec. 709), de modo que la
+  información no depende solo del tono: sirve en escala de grises y cuando el contraste de tono falla.
+- **Classic:** la idea original de Sergio (verde centro, rojo alto, azul bajo) con los puntos intermedios de máxima
+  luminancia (amarillo, cian) para que el degradado no se oscurezca a mitad de camino. Es la opción menos segura
+  para daltonismo: con protanopía/deuteranopía el verde y el amarillo/naranja se parecen mucho.
+- **Comprobación aproximada** (matrices de Machado et al. 2009 con severidad 1, escritas de memoria, ΔE76 en CIELAB;
+  orientativa, no es una prueba clínica ni se hizo con una herramienta de simulación independiente):
+  Safe mantiene ΔE ≥ 47 entre sus tres puntos en visión normal, protanopía, deuteranopía y tritanopía (mínimo 47 en
+  bajo–centro con tritanopía, 54 en centro–alto con protanopía). Classic cae a ΔE 8 (protanopía) y 20 (deuteranopía)
+  entre el verde y el amarillo, y a 17 entre cian y verde con tritanopía. La paleta ToneMap antigua tenía ΔE 24 entre
+  centro y alto con protanopía.
+- **Etiquetas y marcadores:** negro o blanco según `useBlackLabel(Rgb)` (`relLuminance` > 0,5, función pura probada en
+  el banco). La luminancia se calcula sobre los canales sRGB **codificados** (no linealizados): con el umbral 0,5
+  sobre la luminancia lineal, el naranja (0,32) llevaría texto blanco de peor contraste. Con la regla actual: texto
+  negro sobre el centro de Safe, el naranja pleno (0,521, justo por encima del umbral: al atenuarse pasa a blanco) y
+  los centros, amarillos y cianes de Classic; blanco sobre el azul, el rojo y las celdas oscuras. Las celdas nunca
+  tocadas siguen con la etiqueta gris `#4b5563` sobre negro.
+- **Ajuste:** `tmPalette` (0..1, defecto 0, clave NVS `tmPal`), `clampAll`/`load`/`tick`, y la línea serie
+  `[settings] tuner:` lleva `pal=%d`. Tecla `P` solo en la vista ToneMap (no es global), mensaje de 1,5 s
+  `Palette: Safe` / `Palette: Classic`.
+- **Riesgo conocido:** la aguja (`#ef4444`) casi no se distingue sobre el rojo pleno de Classic (alto) y poco sobre el
+  naranja de Safe; se dejó la aguja intacta por petición expresa. La línea de referencia negra sí se ve.
+
+### 13.3 Mapa más contrastado
+
+| Constante | tonemap.live / antes | Ahora | Efecto |
+|---|---|---|---|
+| `spanMul` Relaxed / Medium / Hard | 4 / 4 / 8 | **2 / 2 / 4** | color pleno desde ±18,5 / ±15,5 / ±10,1 c (antes ±30,6 / ±25,8 / ±18,1 c) |
+| `FULL_CONF_MS` (`kFullConfMs`) | 500 | **250** | intensidad plena tras 0,25 s de sonido acumulado |
+| `STAIN_MIN_FRACTION` (`kStainMinFraction`) | 0,25 | **0,45** | una celda desvanecida se queda al 45 % de su intensidad base |
+
+La zona de centro puro no cambia (±6,17 c Relaxed, ±5,19 c Medium, ±2,02 c Hard) ni la zona muerta de la aguja/LED.
+Con el nuevo `FULL_CONF_MS`, `baseIntensity(125 ms)` = 0,5 y `baseIntensity(250 ms)` = 1; los ejemplos del banco
+(color del fade, Relaxed EMA, 0,625 → 0,725, etc.) se rederivaron con el port en Python.
+
+### 13.4 Firmware normal sin superposición de depuración
+
+Toda la superposición (`debugOverlay`), la línea serie `[tm]` y los contadores están bajo `#ifdef TONEMAP_DEBUG`, que solo
+define `cardputer-adv-tonemap-debug`. Se comprobó que `cardputer-adv` (y `-debug`, `-led-debug`) no contienen en el
+binario las cadenas `a/s%.1f`, `[tm] an/s` ni `starved=`. Los avisos de ciclo de vida `[tonemap] enter/leave/paused`
+por serie se mantienen en todos los entornos (no se dibujan en pantalla).

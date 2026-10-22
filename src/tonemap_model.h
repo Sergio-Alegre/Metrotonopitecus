@@ -25,18 +25,23 @@ enum class Sensitivity : uint8_t { Relaxed, Medium, Hard };
 struct SensConst {
     float deadzone;     // |errRatio| <= deadzone: "in tune" (needle / LED) and pure-centre colour
     float errScale;     // colour uses errRatio * errScale
-    float spanMul;      // colour saturates at deadzone * (1 + spanMul)
+    float spanMul;      // colour saturates at deadzone * (1 + spanMul) (device feedback 2026-10-22: 2 / 2 / 4)
     float needleTauMs;  // needle EMA time constant (only Relaxed smooths; see tick())
 };
-extern const SensConst kSens[3];  // Relaxed {0.0025,0.7,4,350}, Medium {0.0021,0.7,4,80}, Hard {0.00105,0.9,8,30}
+// Relaxed {0.0025,0.7,2,350}, Medium {0.0021,0.7,2,80}, Hard {0.00105,0.9,4,30}.
+// tonemap.live uses spanMul 4 / 4 / 8; the narrower ramp is a deliberate deviation (bolder map, see
+// docs/TONEMAP_DESIGN.md section 13): full colour at +-18.5 c (Relaxed), +-15.5 c (Medium), +-10.1 c (Hard).
+extern const SensConst kSens[3];
 
 constexpr uint32_t kHistoryMs[4] = {1000, 3000, 30000, 0};                // 0 = unlimited
 constexpr int32_t kHoldMs[6] = {5000, 15000, 30000, 120000, 300000, -1};  // -1 = no fade
 constexpr int8_t kTransposeSemis[4] = {0, -2, 3, 5};
 
-// ToneMap constants.
-constexpr float kFullConfMs = 500.0f;     // FULL_CONF_MS
-constexpr float kStainMinFraction = 0.25f;
+// ToneMap constants. Two of them deliberately differ from tonemap.live to make the map more visible at a
+// glance (device feedback 2026-10-22, docs/TONEMAP_DESIGN.md section 13): FULL_CONF_MS is 250 (ToneMap: 500)
+// and STAIN_MIN_FRACTION is 0.45 (ToneMap: 0.25).
+constexpr float kFullConfMs = 250.0f;     // FULL_CONF_MS (ToneMap: 500)
+constexpr float kStainMinFraction = 0.45f;  // STAIN_MIN_FRACTION (ToneMap: 0.25)
 constexpr uint32_t kFadeMs = 10000;       // STAIN_FADE_SECONDS
 constexpr float kFadeInMs = 125.0f;       // STAIN_FADE_IN_MS (Relaxed display EMA)
 
@@ -53,9 +58,24 @@ constexpr float kMaxAcceptCents = 100.0f;
 struct Rgb {
     uint8_t r, g, b;
 };
-constexpr Rgb kHigh = {255, 170, 0};
-constexpr Rgb kCenter = {34, 197, 94};
-constexpr Rgb kLow = {0, 86, 214};
+
+// ---- Palettes (full-intensity colours; the cell blends them with black by the display intensity) -------
+// The model reports the signed tendency t in [-1, +1] (+ = high / sharp, 0 = centre, see biasT) and a palette
+// maps it to a colour. tonemap.live's own colours ({255,170,0}, {34,197,94}, {0,86,214}) are gone.
+constexpr int kPaletteCount = 2;
+// Palette 0, "Safe" (default): blue - near-white - orange diverging scale for red-green and blue-yellow
+// colour vision deficiency. Relative luminance is strictly ordered centre > high > low, so it also reads in
+// greyscale / protanopia. centre -> high and centre -> low are linear in RGB.
+constexpr Rgb kSafeLow = {0, 100, 255};
+constexpr Rgb kSafeCentre = {200, 255, 200};
+constexpr Rgb kSafeHigh = {255, 110, 0};
+// Palette 1, "Classic": green centre; high = green -> yellow -> red, low = green -> cyan -> blue
+// (three-stop gradients, t in [0, 0.5] first half, [0.5, 1] second half; luminance-preserving mid-points).
+constexpr Rgb kClassicCentre = {0, 255, 0};
+constexpr Rgb kClassicHighMid = {255, 255, 0};
+constexpr Rgb kClassicHigh = {255, 0, 0};
+constexpr Rgb kClassicLowMid = {0, 255, 255};
+constexpr Rgb kClassicLow = {0, 0, 255};
 
 // ---- Frequency -> note (pure functions) -------------------------------------------------
 // The single place a temperament would plug in.
@@ -74,9 +94,20 @@ struct NoteHit {
 NoteHit freqToNote(float hz, float a4);
 
 float needlePct(float cents);   // (clamp(c,-50,50)+50)/100; 0 = flat edge of the cell
-Rgb biasColor(Sensitivity s, float avgErrRatio);  // colour at display intensity 1
+// Signed tendency t in [-1, +1] (+ = sharp / high) from ToneMap's bias*() formulas: 0 while
+// |avgErrRatio * errScale| <= deadzone (and for NaN), else (|e'| - deadzone) / (spanMul * deadzone) clamped to 1.
+float biasT(Sensitivity s, float avgErrRatio);
+// Colour of palette `palette` (0 Safe, 1 Classic; anything else is treated as 0) at tendency t, display
+// intensity 1. t is clamped to [-1, +1]; NaN gives the centre colour.
+Rgb paletteColor(int palette, float t);
+Rgb biasColor(int palette, Sensitivity s, float avgErrRatio);  // paletteColor(palette, biasT(s, avgErrRatio))
+// Relative luminance 0..1 of an sRGB colour (Rec. 709 weights on the gamma-encoded channels, i.e. a
+// perceptual lightness proxy; linearised luminance would give white text on orange).
+float relLuminance(Rgb c);
+// Label / marker colour on a cell showing `displayed`: true = black, false = white (luminance > 0.5).
+bool useBlackLabel(Rgb displayed);
 bool inDeadzone(Sensitivity s, float errRatio);   // |errRatio| <= deadzone (raw, unscaled)
-float baseIntensity(uint32_t totalMs);            // min(1, total/500)
+float baseIntensity(uint32_t totalMs);            // min(1, total/250)
 
 struct TickResult {
     bool hasNote;       // a note is active after this tick
@@ -120,7 +151,7 @@ constexpr uint8_t kFlagVisited = 1, kFlagAnchorValid = 2, kFlagEverStained = 4;
 class Model {
 public:
     Model() {}
-    // Clears every note and the active note; keeps sensitivity / history / hold / A4 / transposition.
+    // Clears every note and the active note; keeps sensitivity / history / hold / palette / A4 / transposition.
     void reset(uint32_t nowMs);
 
     // The five setters below apply ToneMap's recompute side effects to every stained note:
@@ -133,6 +164,8 @@ public:
     // Color hold change: no timer restart. nowMs is needed to materialise a Relaxed fade in
     // progress (deviation from the design signature setHold(int)).
     void setHold(int idx, uint32_t nowMs);
+    // Palette (0 Safe, 1 Classic; clamped). Only changes how colours are computed: no timers, no data.
+    void setPalette(int idx);
 
     // One analysis frame. `valid` = the caller's gates passed (clarity, level, 14 < hz < 8200).
     // An invalid frame, or a non-finite / <= 0 hz, ends the active note. dtMs = time since the
@@ -141,7 +174,7 @@ public:
     TickResult tick(bool valid, float hz, uint32_t dtMs, uint32_t nowMs);
     void endNote();  // pause / leave: next valid frame starts a new note
 
-    // Colour of the cell for a WRITTEN midi at time nowMs (lazy fade evaluated here).
+    // Colour of the cell for a WRITTEN midi at time nowMs (lazy fade evaluated here), in the current palette.
     // Black when the display intensity is <= 0.001 or the note is outside 0..127.
     Rgb cellColor(int writtenMidi, uint32_t nowMs, bool* visited) const;
     // True while any note is inside (or just after, +kFadeSettleMs) its 10 s fade ramp.
@@ -155,6 +188,7 @@ public:
     Sensitivity sensitivity() const { return sens_; }
     int historyIdx() const { return histIdx_; }
     int holdIdx() const { return holdIdx_; }
+    int palette() const { return palette_; }
     float refA() const { return a4_; }
     int transposition() const { return transp_; }
     int activeConcertMidi() const { return activeMidi_; }
@@ -170,6 +204,7 @@ private:
     Sensitivity sens_ = Sensitivity::Medium;
     uint8_t histIdx_ = 1;
     uint8_t holdIdx_ = 2;
+    uint8_t palette_ = 0;
     int8_t transp_ = 0;
     float a4_ = 440.0f;
     int activeMidi_ = -1;       // concert midi of the note of the previous valid frame
