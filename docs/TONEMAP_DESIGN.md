@@ -838,3 +838,26 @@ Tests (`tonemap_bench.cpp`, valores rederivados en el port Python): puntos de pa
 (la cuantización de 16 bits del historial pesa más en un degradado de ~65-100 niveles por cent), mezcla a display 0,5, `biasTLinear`
 (0, NaN, ±inf, extremos), sin meseta (+0,02 c ya cambia el rojo), desvanecido (246,112,0 a 0,8625 y 220,100,0 a 0,45 en +12 c Medium)
 y la regla `0,75 + 0,25 * display`.
+
+### 13.8 Color vivo: cents de la franja y LED (2026-10-22)
+
+El jugador necesita ver de un vistazo si está bajo o alto y hacia dónde corregir, así que el texto de cents (`+3.2c`) y el LED
+dejan de ser "verde / blanco" y pasan a mostrar el color de la desviación **instantánea** de la nota que suena:
+
+- **Función pura** `Rgb liveColor(int palette, Sensitivity s, float errRatio)` (`tonemap_model`): Safe →
+  `paletteColor(0, biasT(s, errRatio))` (zona muerta: color de centro exacto); Extreme → `paletteColor(1, biasTLinear(s, errRatio))`.
+  Intensidad plena: nada de 0,75 + 0,25·display, desvanecido ni mezcla con negro. NaN da el color de centro. Se usa el `errRatio`
+  bruto del fotograma (`TickResult.errRatio`, el mismo de la zona muerta), no la aguja suavizada de Relaxed ni el promedio del historial.
+- **Franja:** los cents se dibujan con ese color (guardado en el `Snapshot` para redibujar al cambiar). Nota y Hz como antes.
+- **LED** (`ledUpdate`): con `L` on, nota activa y sin pausa muestra el color vivo; apagado sin nota, en pausa, con `L` off y al salir
+  (mismos caminos que antes, `ledOffBlocking` en `leave()`). El color se envía al empezar la nota y luego solo si algún canal se movió
+  `kLedStep` = 16 niveles o más y han pasado al menos `kLedMinGapMs` = 50 ms desde el último envío; cada envío se repite
+  `kLedResends` = 2 veces a los 6 y 12 ms (el LED solo es fiable con el brillo a 255, que la vista ya fuerza con LED on).
+- **Ejemplos** (Medium, color a error −20 / −10 / −3 / 0 / +3 / +10 / +20 cents):
+  Safe (0,100,255) · (108,184,225) · (200,255,200) · (200,255,200) · (200,255,200) · (226,188,107) · (255,110,0);
+  Extreme (0,0,255) · (0,184,255) · (0,255,98) · (0,255,0) · (98,255,0) · (255,182,0) · (255,0,0).
+- **Riesgos:** el azul puro de Extreme `(0,0,255)` es el color más oscuro sobre la franja negra (contraste ≈ 2,4:1; el azul de Safe
+  `(0,100,255)` ≈ 4,3:1); en Extreme el color cambia unos 65-100 niveles por cent, así que el LED puede parpadear con vibrato fuerte
+  (el umbral de 16 niveles y los 50 ms lo limitan); el centro de Safe `(200,255,200)` es casi blanco en el LED.
+- Tests: `liveColor` (ambas paletas, zona muerta, extremos, infinitos, NaN, paleta desconocida, coincidencia con `cellColor` a display 1
+  en Safe) en el banco y en el port Python.

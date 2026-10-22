@@ -685,6 +685,52 @@ void testPalette() {
         }
     }
 
+    // liveColor: colour of the INSTANTANEOUS deviation (strip cents text, LED), full intensity, active palette:
+    // Safe through biasT (dead zone), Extreme through biasTLinear. Expected from the closed form (Python port).
+    {
+        struct LiveCase {
+            int palette;
+            Sensitivity s;
+            double cents;
+            uint8_t r, g, b;
+        };
+        static const LiveCase kLive[] = {
+            {0, Sensitivity::Medium, -20.0, 0, 100, 255},   {0, Sensitivity::Medium, -10.0, 108, 184, 225}, {0, Sensitivity::Medium, -3.0, 200, 255, 200},
+            {0, Sensitivity::Medium, 0.0, 200, 255, 200},   {0, Sensitivity::Medium, 3.0, 200, 255, 200},   {0, Sensitivity::Medium, 10.0, 226, 188, 107},
+            {0, Sensitivity::Medium, 20.0, 255, 110, 0},    {1, Sensitivity::Medium, -20.0, 0, 0, 255},     {1, Sensitivity::Medium, -10.0, 0, 184, 255},
+            {1, Sensitivity::Medium, -3.0, 0, 255, 98},     {1, Sensitivity::Medium, 0.0, 0, 255, 0},       {1, Sensitivity::Medium, 3.0, 98, 255, 0},
+            {1, Sensitivity::Medium, 10.0, 255, 182, 0},    {1, Sensitivity::Medium, 20.0, 255, 0, 0},      {0, Sensitivity::Hard, -3.0, 176, 236, 207},
+            {0, Sensitivity::Hard, 3.0, 207, 237, 176},     {1, Sensitivity::Hard, -3.0, 0, 255, 151},      {1, Sensitivity::Hard, 3.0, 152, 255, 0},
+            {0, Sensitivity::Relaxed, 12.0, 226, 186, 105}, {1, Sensitivity::Relaxed, 12.0, 255, 179, 0},    {1, Sensitivity::Relaxed, -12.0, 0, 181, 255},
+        };
+        for (const LiveCase& l : kLive) {
+            const Rgb got = liveColor(l.palette, l.s, (float)ratioOf(l.cents));
+            s.check(rgbNear(got, l.r, l.g, l.b, 1), "liveColor pal%d %s %+.1f c got (%d,%d,%d) expected (%d,%d,%d)", l.palette, sensName(l.s), l.cents,
+                    got.r, got.g, got.b, l.r, l.g, l.b);
+        }
+        // exact: Safe inside the dead zone is the pure centre colour; Extreme has no plateau but exactly 0 is green
+        s.check(rgbNear(liveColor(0, Sensitivity::Medium, 0.0f), 200, 255, 200, 0) && rgbNear(liveColor(0, Sensitivity::Medium, (float)ratioOf(5.0)), 200, 255, 200, 0) &&
+                    rgbNear(liveColor(0, Sensitivity::Medium, (float)ratioOf(-5.0)), 200, 255, 200, 0),
+                "liveColor Safe dead zone (+-5 c Medium) = centre colour");
+        s.check(rgbNear(liveColor(1, Sensitivity::Medium, 0.0f), 0, 255, 0, 0), "liveColor Extreme 0 = pure green");
+        // extremes, infinities, NaN (centre colour), unknown palette index (Safe)
+        s.check(rgbNear(liveColor(0, Sensitivity::Hard, 0.5f), 255, 110, 0, 0) && rgbNear(liveColor(0, Sensitivity::Hard, -0.5f), 0, 100, 255, 0) &&
+                    rgbNear(liveColor(1, Sensitivity::Hard, 0.5f), 255, 0, 0, 0) && rgbNear(liveColor(1, Sensitivity::Hard, -0.5f), 0, 0, 255, 0) &&
+                    rgbNear(liveColor(1, Sensitivity::Medium, INFINITY), 255, 0, 0, 0) && rgbNear(liveColor(1, Sensitivity::Medium, -INFINITY), 0, 0, 255, 0),
+                "liveColor extremes / infinities");
+        s.check(rgbNear(liveColor(0, Sensitivity::Medium, NAN), 200, 255, 200, 0) && rgbNear(liveColor(1, Sensitivity::Medium, NAN), 0, 255, 0, 0), "liveColor NaN -> centre colour");
+        s.check(rgbNear(liveColor(9, Sensitivity::Medium, (float)ratioOf(10.0)), 226, 188, 107, 1), "liveColor unknown palette index -> Safe");
+        // consistency with the cell at display 1 (Safe, 4 s of +12 c, no fade): the live colour is the same function of the same error
+        fresh(Sensitivity::Medium, 1, 5);
+        feedNote(69, 12.0, 200, 20);
+        {
+            const Rgb cell = gModel.cellColor(69, gNow, nullptr);
+            const Rgb live = liveColor(0, Sensitivity::Medium, (float)ratioOf(12.0));
+            s.check(rgbNear(cell, live.r, live.g, live.b, 1), "liveColor == cellColor at display 1 (Safe): live (%d,%d,%d) cell (%d,%d,%d)", live.r, live.g, live.b, cell.r,
+                    cell.g, cell.b);
+        }
+    }
+
     // label colour rule: black text above 0.5 relative luminance, light grey (190,190,190) below
     s.check(relLuminance(Rgb{0, 0, 0}) == 0.0f && fabsf(relLuminance(Rgb{255, 255, 255}) - 1.0f) < 1e-5f && fabsf(relLuminance(Rgb{255, 0, 0}) - 0.2126f) < 1e-5f &&
                 fabsf(relLuminance(Rgb{0, 255, 0}) - 0.7152f) < 1e-5f && fabsf(relLuminance(Rgb{0, 0, 255}) - 0.0722f) < 1e-5f,

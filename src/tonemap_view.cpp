@@ -81,6 +81,8 @@ constexpr uint8_t kLedMinBrightness = 255;
 constexpr int kLedResends = 2;
 constexpr uint32_t kLedResendMs = 6;
 constexpr int kLedOffSends = 3;
+constexpr int kLedStep = 16;             // a new live colour is sent when a channel moved by this much ...
+constexpr uint32_t kLedMinGapMs = 50;    // ... and at most this often (note start / stop are never delayed)
 
 const char* const kSharpNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 const char* const kFlatNames[12] = {"C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"};
@@ -116,6 +118,7 @@ int writtenMidi = 0;
 float dispCents = 0.0f;
 float noteHz = 0.0f;
 bool noteInZone = false;   // raw |errRatio| inside the dead zone of the sensitivity mode
+float liveErr = 0.0f;      // raw errRatio of the current frame (live colour of the cents text and of the LED)
 float level = 0.0f;        // smoothed window RMS (int16 units)
 bool gateOpen = false;     // the last window passed the noise gate
 
@@ -127,7 +130,8 @@ uint32_t msgUntil = 0;
 // LED + brightness.
 bool brightRaised = false;
 uint8_t userBrightness = 128;
-bool ledLit = false;
+bool ledLit = false;       // the LED shows the live colour of the active note
+uint32_t ledSentMs = 0;    // when the live colour was last sent
 int ledResends = 0;
 uint32_t ledResendAt = 0;
 uint8_t ledR = 0, ledG = 0, ledB = 0;
@@ -143,6 +147,7 @@ struct Snapshot {
     int8_t needleRow;
     uint8_t meterPx;
     uint16_t cellColor;
+    uint16_t liveCol;
 };
 Snapshot drawn = {};
 
@@ -248,12 +253,30 @@ void brightnessRestore() {
     brightRaised = false;
 }
 
-// Called every loop: green while the active note is inside the dead zone, off otherwise.
+// Live colour of the note sounding now: the instantaneous deviation (raw per-frame errRatio) in the active palette,
+// full intensity (docs/TONEMAP_DESIGN.md section 13.8).
+Rgb liveRgb() { return liveColor(model.palette(), model.sensitivity(), liveErr); }
+
+inline int absDiff(int a, int b) { return a > b ? a - b : b - a; }
+
+// Called every loop. LED on + active note + not paused: the LED shows the live colour, sent when the note starts and
+// then only when a channel moved by kLedStep or more (and at most every kLedMinGapMs). Otherwise off.
 void ledUpdate() {
-    const bool want = settings::get().tmLed != 0 && !paused && hasNote && noteInZone;
-    if (want != ledLit) {
-        ledLit = want;
-        ledShow(0, want ? 255 : 0, 0);
+    const bool want = settings::get().tmLed != 0 && !paused && hasNote;
+    const uint32_t nowMs = millis();
+    if (!want) {
+        if (ledLit) {
+            ledLit = false;
+            ledShow(0, 0, 0);
+        }
+    } else {
+        const Rgb c = liveRgb();
+        const bool moved = absDiff(c.r, ledR) >= kLedStep || absDiff(c.g, ledG) >= kLedStep || absDiff(c.b, ledB) >= kLedStep;
+        if (!ledLit || (moved && (uint32_t)(nowMs - ledSentMs) >= kLedMinGapMs)) {
+            ledLit = true;
+            ledSentMs = nowMs;
+            ledShow(c.r, c.g, c.b);
+        }
     }
     if (ledResends > 0 && (int32_t)(millis() - ledResendAt) >= 0) {
         ledSend(ledR, ledG, ledB);
@@ -285,6 +308,10 @@ Snapshot makeSnapshot() {
     Snapshot s = {};
     s.hasNote = hasNote;
     s.inZone = hasNote && noteInZone;
+    if (hasNote) {
+        const Rgb lc = liveRgb();
+        s.liveCol = rgb565(lc.r, lc.g, lc.b);
+    }
     s.gateOpen = gateOpen;
     s.meterPx = (uint8_t)meterPixels(level);
     if (hasNote) {
@@ -303,7 +330,7 @@ Snapshot makeSnapshot() {
 bool sameSnapshot(const Snapshot& a, const Snapshot& b) {
     return a.hasNote == b.hasNote && a.inZone == b.inZone && a.gateOpen == b.gateOpen && a.midi == b.midi &&
            a.centsTenths == b.centsTenths && a.hzTenths == b.hzTenths && a.needleRow == b.needleRow &&
-           a.meterPx == b.meterPx && a.cellColor == b.cellColor;
+           a.meterPx == b.meterPx && a.cellColor == b.cellColor && a.liveCol == b.liveCol;
 }
 
 // ---- analysis ----------------------------------------------------------------------------
@@ -324,6 +351,7 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
         dispCents = t.displayCents;
         noteHz = t.hz;
         noteInZone = t.inDeadzone;
+        liveErr = t.errRatio;
     } else {
         noteInZone = false;
     }
@@ -506,7 +534,19 @@ void drawStrip(M5Canvas& c) {
         const int tenths = (int)lroundf(dispCents * 10.0f);
         const int mag = tenths < 0 ? -tenths : tenths;
         snprintf(buf, sizeof(buf), "%c%d.%dc", tenths < 0 ? '-' : '+', mag / 10, mag % 10);
-        c.setTextColor(noteInZone ? kColGreen : kColWhite);
+        Rgb lc = liveRgb();  // live colour of the instantaneous deviation, active palette
+        // Text only (the LED keeps the true colour): very dark colours, i.e. pure blue, are lightened toward
+        // white so the small Font0 digits stay readable on the black strip (pure blue is ~2.4:1 contrast).
+        {
+            const float lum = (0.2126f * lc.r + 0.7152f * lc.g + 0.0722f * lc.b) / 255.0f;
+            float k = (0.18f - lum) / 0.18f;
+            k = k < 0.0f ? 0.0f : (k > 1.0f ? 1.0f : k);
+            k *= 0.5f;
+            lc.r = (uint8_t)(lc.r + (255 - lc.r) * k + 0.5f);
+            lc.g = (uint8_t)(lc.g + (255 - lc.g) * k + 0.5f);
+            lc.b = (uint8_t)(lc.b + (255 - lc.b) * k + 0.5f);
+        }
+        c.setTextColor(rgb565(lc.r, lc.g, lc.b));
         c.drawString(buf, 26, kTextY);
 
         snprintf(buf, sizeof(buf), "%.1f Hz", (double)noteHz);

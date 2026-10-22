@@ -618,3 +618,6 @@ tonemap.live y a las secciones anteriores (el detalle y la justificación están
   `cardputer-adv-tonemap-debug`.
 - **Panel de opciones** (2026-10-22, segunda tanda): `Alt` o `Enter` abre/cierra una superposición a pantalla completa con las
   teclas y sus valores actuales (`SPEC.md`, `TONEMAP_DESIGN.md` §13.5). Pista `Alt:menu` en la franja de info cuando cabe.
+- **Cents y LED con el color vivo** (2026-10-22, tercera tanda): el texto de cents de la franja y el LED muestran el color de la
+  desviación instantánea de la nota que suena, en la paleta activa (Safe: con zona muerta; Extreme: degradado continuo), a
+  intensidad plena. Sustituye al "texto verde / LED verde dentro de la zona muerta" de §2.4 y §2.8 (`TONEMAP_DESIGN.md` §13.8).

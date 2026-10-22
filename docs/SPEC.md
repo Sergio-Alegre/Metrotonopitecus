@@ -170,8 +170,10 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 #### Franja de información (fila superior)
 
 - Izquierda: nota detectada y octava escrita (`A4`), cents con signo y un decimal (`+3.2c`), frecuencia real en Hz.
-  Los cents se pintan en **verde** si estás dentro de la zona muerta del modo (§3.3), blancos si no. Sin nota
-  válida: `--`.
+  Los cents se pintan con el **color vivo** de la desviación instantánea de la nota que suena (ver "LED" abajo: la
+  paleta activa, Safe o Extreme, aplicada al error de ese fotograma; no al promedio de la celda), para ver de un
+  vistazo si estás bajo o alto y hacia dónde corregir. El nombre de la nota sigue en blanco y los Hz en gris. Sin
+  nota válida: `--`.
 - Fuera de rango (nota escrita < C2 o > B7): en lugar de la nota, `Below range` / `Above range`.
 - Derecha: transposición si no es C (`Bb`, `Eb`, `F`), `A=442` (la misma La del afinador clásico) y un
   medidor de nivel del micro (unos 30 px) con una marca en el umbral de la puerta de ruido.
@@ -244,8 +246,14 @@ Añadir A (clarinete en La, −3) es trivial si Sergio lo pide más adelante.
 
 #### LED
 
-- Con `LED` on: el LED RGB (GPIO 21, `neopixelWrite`) se enciende **verde** mientras la nota activa está dentro
-  de la zona muerta del modo, y se apaga en cuanto sale, no hay nota o se pausa.
+- Con `LED` on: el LED RGB (GPIO 21, `neopixelWrite`) muestra de forma continua el **color vivo** de la nota activa: el
+  color de su desviación **instantánea** (el `errRatio` bruto del fotograma, no el promedio ponderado de la celda ni la
+  aguja suavizada de Relaxed) en la **paleta activa**, a intensidad plena (sin atenuar ni mezclar con negro). Safe:
+  `biasT` (con su zona muerta: dentro, el color de centro `(200,255,200)`) → `paletteColor(0, t)`; Extreme:
+  `biasTLinear` (degradado continuo, 0 exacto = verde puro) → `paletteColor(1, t)`. Es la regla que sustituye al antiguo
+  "verde solo dentro de la zona muerta". Se apaga si no hay nota, en pausa, con `L` off y al salir.
+- Para no inundar el LED, el color nuevo se envía al empezar la nota y después solo cuando algún canal cambia 16 niveles
+  o más y como mucho cada 50 ms; cada envío se repite dos veces (a los 6 y 12 ms) como antes.
 - Restricción de hardware ya conocida (ver SPEC, metrónomo): el LED se alimenta del mismo pin que la
   retroiluminación y **solo funciona con la pantalla a brillo 255**. Con LED on, la vista ToneMap guarda el brillo
   del usuario, pone 255 y lo restaura al salir de la vista o del modo, o al poner LED off.

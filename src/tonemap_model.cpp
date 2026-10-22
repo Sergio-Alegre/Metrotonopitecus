@@ -141,6 +141,10 @@ float biasTLinear(Sensitivity s, float avgErrRatio) {
     return t == t ? clampf(t, -1.0f, 1.0f) : 0.0f;  // NaN -> centre
 }
 
+Rgb liveColor(int palette, Sensitivity s, float errRatio) {
+    return paletteColor(palette == 1 ? 1 : 0, palette == 1 ? biasTLinear(s, errRatio) : biasT(s, errRatio));
+}
+
 Rgb biasColor(int palette, Sensitivity s, float avgErrRatio) {
     return paletteColor(palette, palette == 1 ? biasTLinear(s, avgErrRatio) : biasT(s, avgErrRatio));
 }

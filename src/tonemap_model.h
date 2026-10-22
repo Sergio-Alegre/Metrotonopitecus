@@ -111,6 +111,12 @@ Rgb paletteColor(int palette, float t);
 // e = avgErrRatio * errScale and dz + span = deadzone * (1 + spanMul) (Medium: blue .. green .. red across about
 // -15.5 .. 0 .. +15.5 c, Hard +-10.1 c, Relaxed +-18.5 c). No dead zone: exactly 0 (and NaN) is the centre.
 float biasTLinear(Sensitivity s, float avgErrRatio);
+// LIVE colour of the note sounding now (info strip cents text, LED): the colour of the INSTANTANEOUS deviation
+// errRatio (TickResult.errRatio, not the history average and not the Relaxed-smoothed needle) in the active palette:
+// Safe -> paletteColor(0, biasT(s, errRatio)) (exact pure centre colour inside the dead zone), Extreme ->
+// paletteColor(1, biasTLinear(s, errRatio)). Full intensity: no fade, no 0.75 + 0.25 * display rule, no blending
+// with black. NaN gives the centre colour.
+Rgb liveColor(int palette, Sensitivity s, float errRatio);
 // Colour of a cell with average error avgErrRatio: paletteColor(palette, biasT(...)) for Safe (dead zone) and
 // paletteColor(1, biasTLinear(...)) for Extreme.
 Rgb biasColor(int palette, Sensitivity s, float avgErrRatio);
