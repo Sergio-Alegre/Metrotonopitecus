@@ -84,7 +84,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
   *(Sustituido el 2026-10-22: dos paletas, Safe y Extreme (antes Classic), tecla `P`; ver la nota "Cambios tras pruebas en
   dispositivo" al final y `SPEC.md`.)*
 - **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): borde blanco interior de 2 px
-  *(sustituido el 2026-10-22 por cuatro esquinas en L)*,
+  *(sustituido el 2026-10-22 por cuatro esquinas en L y después, el mismo día, por una barra blanca inferior + etiqueta blanca; ver `SPEC.md`)*,
   una línea de referencia negra de 2 px en el centro vertical de la celda y la **aguja**: barra roja
   `#ef4444` de 2 px de alto a lo ancho de la celda. Posición vertical: arriba = alto. Recorrido del 10 % al
   90 % de la altura para −50…+50 cents (fórmula en §3.5).
@@ -601,14 +601,15 @@ Prompt base:
 Sergio probó la vista en el Cardputer ADV y pidió un mapa más legible de un vistazo. Cambios deliberados respecto a
 tonemap.live y a las secciones anteriores (el detalle y la justificación están en `TONEMAP_DESIGN.md` §13):
 
-- **Celda activa:** el borde blanco interior de 2 px tapaba demasiado de la celda de 20 × 18 px; ahora son cuatro
-  esquinas en L (brazos de 5 px, 2 px de grosor), en negro o blanco según la luminancia del color de la celda.
-  La línea de referencia negra de 2 px y la aguja no cambian.
+- **Celda activa:** el borde blanco interior de 2 px tapaba demasiado de la celda de 20 × 18 px; ahora (segunda tanda, 2026-10-22)
+  el blanco es exclusivo de la celda activa: una barra blanca de 2 px sobre el borde inferior de la celda y la etiqueta en
+  blanco (sin esquinas, contorno ni sombra); las demás etiquetas, negro o gris claro `(190,190,190)` por luminancia. La línea de
+  referencia negra de 2 px y la aguja no cambian (la aguja se dibuja después de la barra).
 - **Paletas** (§2.3, sustituye a la paleta fija): `Safe` (por defecto; azul – casi blanco – naranja, pensada para
-  daltonismo y con la luminancia ordenada centro > alto > bajo) y `Extreme` (antes `Classic`; primarios puros: verde en el
-  centro, amarillo y rojo para alto, cian y azul para bajo; rampa empinada —color pleno desde `|t|` = 0,3— y sin atenuar por
-  debajo del 75 %, ver `TONEMAP_DESIGN.md` §13.7). Tecla `P`, ajuste `tmPal`, mensaje `Palette: Safe` / `Palette: Extreme`.
-  Las etiquetas de las celdas tocadas pasan a negro o blanco según la luminancia del color mostrado.
+  daltonismo y con la luminancia ordenada centro > alto > bajo) y `Extreme` (antes `Classic`; primarios puros en un único degradado
+  continuo: azul en el extremo bajo, verde justo en el centro, rojo en el alto, sin meseta ni saltos —`t_lin` lineal sobre todo
+  el rango, ±15,5 c en Medium— y sin atenuar por debajo del 75 %, ver `TONEMAP_DESIGN.md` §13.7). Tecla `P`, ajuste `tmPal`, mensaje `Palette: Safe` / `Palette: Extreme`.
+  Las etiquetas de las celdas tocadas pasan a negro o gris claro según la luminancia del color mostrado (blanco solo en la celda activa).
 - **Rampa más estrecha** (§3.3): `span` = 2·dz en Relaxed y Medium, 4·dz en Hard (antes 4, 4 y 8). Color pleno desde
   ±18,5 c (Relaxed), ±15,5 c (Medium) y ±10,1 c (Hard); la zona de centro puro no cambia (±6,2 / ±5,2 / ±2,0 c).
 - **Intensidad plena a los 250 ms** de sonido (`FULL_CONF_MS`, antes 500) y **suelo del desvanecido 0,45**

@@ -52,8 +52,7 @@ RgbF paletteF(int palette, float t) {
     if (!(t == t)) t = 0.0f;
     t = clampf(t, -1.0f, 1.0f);
     if (palette == 1) {  // Extreme: green -> yellow -> red / green -> cyan -> blue
-        // distance from the centre of the steep ramp, 0..1: t_e = sign(t) * clamp(|t| / kExtremeFullT, 0, 1)
-        const float a = clampf((t < 0.0f ? -t : t) / kExtremeFullT, 0.0f, 1.0f);
+        const float a = t < 0.0f ? -t : t;  // distance from the centre, 0..1 (t is the linear position)
         const bool high = t >= 0.0f;
         const Rgb& mid = high ? kExtremeHighMid : kExtremeLowMid;
         const Rgb& end = high ? kExtremeHigh : kExtremeLow;
@@ -136,7 +135,15 @@ Rgb paletteColor(int palette, float t) {
     return o;
 }
 
-Rgb biasColor(int palette, Sensitivity s, float avgErrRatio) { return paletteColor(palette, biasT(s, avgErrRatio)); }
+float biasTLinear(Sensitivity s, float avgErrRatio) {
+    const SensConst& c = kSens[(int)s];
+    const float t = avgErrRatio * c.errScale / (c.deadzone * (1.0f + c.spanMul));
+    return t == t ? clampf(t, -1.0f, 1.0f) : 0.0f;  // NaN -> centre
+}
+
+Rgb biasColor(int palette, Sensitivity s, float avgErrRatio) {
+    return paletteColor(palette, palette == 1 ? biasTLinear(s, avgErrRatio) : biasT(s, avgErrRatio));
+}
 
 float relLuminance(Rgb c) { return (0.2126f * (float)c.r + 0.7152f * (float)c.g + 0.0722f * (float)c.b) / 255.0f; }
 
@@ -467,7 +474,8 @@ Rgb Model::cellColor(int writtenMidi, uint32_t nowMs, bool* visited) const {
     if (visited) *visited = (s.flags & kFlagVisited) != 0;
     const float display = evalDisplay(s, nowMs);
     if (display <= 0.001f) return black;
-    const RgbF bias = paletteF(palette_, biasT(sens_, avgErrRatio(concert)));
+    const float err = avgErrRatio(concert);
+    const RgbF bias = paletteF(palette_, palette_ == 1 ? biasTLinear(sens_, err) : biasT(sens_, err));
     // lerp(background = black, bias, shown intensity), rounded per channel. Extreme never dims below 0.75.
     const float k = palette_ == 1 ? kExtremeMinDisplay + (1.0f - kExtremeMinDisplay) * display : display;
     Rgb o = {toByte(bias.r * k), toByte(bias.g * k), toByte(bias.b * k)};

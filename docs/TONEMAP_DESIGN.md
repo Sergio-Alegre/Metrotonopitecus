@@ -676,10 +676,19 @@ comentarios del código (`tonemap_model.h/.cpp`).
 
 ### 13.1 Marcador de la celda activa
 
-El borde blanco interior de 2 px tapaba demasiado de la celda de 20 × 18 px. Ahora son **cuatro esquinas en L**
-(`kBracketArm` = 5 px, `kBracketThick` = 2 px, dibujadas en `drawCorner`), en **negro o blanco según la luminancia
-relativa del color que muestra la celda** (misma regla que la etiqueta). 2 px de grosor y 5 de brazo no pisan la
-etiqueta (que empieza en x+2, y+2). Se dibujan antes que la línea de referencia negra y la aguja, que no cambian.
+El borde blanco interior de 2 px tapaba demasiado de la celda de 20 × 18 px. Primero se sustituyó por cuatro esquinas en L; tras
+la segunda tanda de pruebas (2026-10-22) **se eliminaron las esquinas** y el blanco pasó a ser exclusivo de la celda activa, en
+dos sitios y sin contorno ni sombra:
+
+- **Barra blanca** (`drawActiveCell`, `kActiveBarH` = 2): `fillRect(x, y + kCellH - 1 - kActiveBarH, kCellW - 1, kActiveBarH)`, es
+  decir columnas x..x+18 (por dentro de la línea de cuadrícula de la derecha, x+19) y filas y+15 e y+16, apoyada sobre la línea de
+  cuadrícula inferior (fila y+17). Se dibuja antes que la línea de referencia negra y la aguja roja, así que la aguja se ve donde cruza.
+- **Etiqueta blanca** (`drawCell`): la celda activa (`hasNote && writtenMidi == midi`) dibuja su nombre en blanco aunque su color
+  sea claro; al dejar de ser activa vuelve a la regla de siempre. El resto de las celdas visitadas: negro o **gris claro
+  `(190,190,190)`** (`kColLabelLight`) según `useBlackLabel`; las nunca tocadas, `#4b5563`. No hay otro blanco en la cuadrícula.
+- La línea de referencia negra (x+2..x+17, 2 px en el centro vertical) y la aguja no cambian. La etiqueta (filas y+2..y+8) comparte
+  la fila y+8 con la línea negra, como antes.
+- **Riesgo conocido:** sobre el casi blanco del centro de Safe `(200,255,200)` la barra y la etiqueta blancas contrastan poco.
 
 ### 13.2 Paletas y daltonismo
 
@@ -689,7 +698,7 @@ la convierte en color; `Model::setPalette(int)` guarda la paleta (0 Safe, 1 Extr
 `cellColor` la usa. Cambiar de paleta solo exige redibujar: no toca datos ni temporizadores (`setPalette` no lleva
 `nowMs`). `biasColor(palette, s, avgErrRatio)` queda como atajo `paletteColor(palette, biasT(...))`.
 
-| t | Safe (0) | Extreme (1), sin remapeo (ver §13.7 para el real) |
+| t | Safe (0) | Extreme (1), con t = posición lineal (§13.7) |
 |---|---|---|
 | −1 | (0, 100, 255) | (0, 0, 255) |
 | −0,5 | (100, 178, 228) | (0, 255, 255) |
@@ -791,30 +800,41 @@ elegir solo la nota del **drone** (se rotula `Drone <Hz>`).
 - **Signo `#`** (`drawSharp`): dos barras verticales de 2 px (3 px a partir de h = 24), la derecha 2 px más alta, y dos barras
   de la misma anchura que suben a la derecha y sobresalen 2 px de los palos, dibujadas columna a columna con `fillRect`.
 
-### 13.7 Paleta Extreme: rampa empinada y sin atenuar (2026-10-22)
+### 13.7 Paleta Extreme: degradado continuo y sin atenuar (2026-10-22)
 
-Segunda tanda de pruebas: la paleta Extreme (antes Classic) no era lo bastante extrema. Se separan al máximo los tres estados y
-se ignora el daltonismo (Safe lo cubre). Cambios solo en la paleta 1:
+La paleta Extreme (antes Classic) se hizo cada vez más extrema tras las pruebas en el dispositivo. Primera versión: rampa empinada
+(`t_e = |t| / 0,3`) y sin atenuar. Segunda: el usuario ve que los colores "saltan", así que la rampa empinada y la meseta de verde puro
+se quitan y queda **un único degradado continuo sobre todo el rango de la celda**. Se ignora el daltonismo (Safe lo cubre). Solo la
+paleta 1:
 
-- **Extremos:** primarios sRGB puros, bajo `(0,0,255)`, centro `(0,255,0)`, alto `(255,0,0)`; puntos medios amarillo y cian.
-  ΔE76 (CIELAB, D65): verde–azul 258,7, azul–rojo 176,3, verde–rojo 170,6 (mínimo 170,6). Entre los vértices del cubo
-  {R,G,B,C,M,Y} con el verde de centro, ningún otro par (bajo, alto) iguala ese mínimo (el mejor siguiente, magenta–rojo, da 129,5).
-- **Rampa empinada:** antes de buscar el color, `t_e = signo(t) * min(1, |t| / kExtremeFullT)` con `kExtremeFullT = 0,3`. La zona de
-  verde puro (zona muerta de `biasT`) no cambia; el color es rojo/azul pleno desde `|t|` = 0,3 y amarillo/cian en 0,15.
-  En cents (pleno / amarillo-cian): Relaxed 9,87 / 8,02, Medium 8,29 / 6,74, Hard 4,44 / 3,23 (verde puro hasta 6,17 / 5,19 / 2,02).
+- **Extremos:** primarios sRGB puros, bajo `(0,0,255)`, centro `(0,255,0)`, alto `(255,0,0)`; puntos medios amarillo y cian
+  (luminancia máxima, sin marrón). ΔE76 (CIELAB, D65): verde–azul 258,7, azul–rojo 176,3, verde–rojo 170,6 (mínimo 170,6). Entre los
+  vértices del cubo {R,G,B,C,M,Y} con el verde de centro, ningún otro par (bajo, alto) iguala ese mínimo (el siguiente, magenta–rojo,
+  da 129,5).
+- **Posición lineal** (`biasTLinear`, junto a `biasT`): `t_lin = clamp(e' / (dz·(1 + spanMul)), −1, +1)` con
+  `e' = avgErrRatio · errScale`; NaN da 0. Sin zona muerta: 0 exacto es `(0,255,0)` y cualquier desviación ya cambia el color.
+  `paletteColor(1, t)` interpola verde→amarillo→rojo (|t| 0, 0,5, 1) y verde→cian→azul. `cellColor` y `biasColor` usan `biasTLinear`
+  para la paleta 1 y `biasT` (con su zona muerta) para Safe.
 - **Sin atenuar:** para la paleta 1 la intensidad efectiva es `kExtremeMinDisplay + (1 - kExtremeMinDisplay) * display` =
   `0,75 + 0,25 * display`. Una celda manchada nunca baja del 75 %; las desvanecidas (display 0,45) quedan en 0,8625 y las notas
   cortas (display 0,5) en 0,875. Visitada pero nunca manchada sigue en negro. Safe usa el display tal cual.
-- **Etiquetas y esquinas** siguen la regla de luminancia sobre el color mostrado.
+- **Etiquetas** siguen la regla de luminancia sobre el color mostrado (§13.1).
 
-| t | RGB (Extreme, display 1) |
-|---|---|
-| −1, −0,5 | (0, 0, 255) |
-| −0,15 | (0, 255, 255) |
-| 0 | (0, 255, 0) |
-| +0,15 | (255, 255, 0) |
-| +0,5, +1 | (255, 0, 0) |
+| t_lin | RGB (display 1) | Relaxed (c) | Medium (c) | Hard (c) |
+|---|---|---|---|---|
+| −1 | (0, 0, 255) | −18,65 | −15,65 | −10,13 |
+| −0,5 | (0, 255, 255) | −9,30 | −7,81 | −5,06 |
+| −0,25 | (0, 255, 128) | −4,64 | −3,90 | −2,53 |
+| −0,1 | (0, 255, 51) | −1,86 | −1,56 | −1,01 |
+| 0 | (0, 255, 0) | 0 | 0 | 0 |
+| +0,1 | (51, 255, 0) | +1,85 | +1,56 | +1,01 |
+| +0,25 | (128, 255, 0) | +4,63 | +3,89 | +2,52 |
+| +0,5 | (255, 255, 0) | +9,25 | +7,77 | +5,04 |
+| +1 | (255, 0, 0) | +18,45 | +15,51 | +10,07 |
 
-Tests (`tonemap_bench.cpp`, con los valores rederivados en el port Python): puntos de paleta exactos, casos de color con tolerancia 4
-(la cuantización de 16 bits del historial se amplifica en la rampa empinada, ~160-210 niveles por cent), mezcla a display 0,5,
-umbrales en cents, desvanecido (246 a 0,8625, 220 a 0,45 en +12 c Medium) y la regla `0,75 + 0,25 * display`.
+(Los cents negativos son algo mayores porque el error se mide en razón, no en cents.)
+
+Tests (`tonemap_bench.cpp`, valores rederivados en el port Python): puntos de paleta exactos en `t_lin`, casos de color con tolerancia 2
+(la cuantización de 16 bits del historial pesa más en un degradado de ~65-100 niveles por cent), mezcla a display 0,5, `biasTLinear`
+(0, NaN, ±inf, extremos), sin meseta (+0,02 c ya cambia el rojo), desvanecido (246,112,0 a 0,8625 y 220,100,0 a 0,45 en +12 c Medium)
+y la regla `0,75 + 0,25 * display`.

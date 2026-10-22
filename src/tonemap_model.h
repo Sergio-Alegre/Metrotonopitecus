@@ -70,12 +70,10 @@ constexpr Rgb kSafeLow = {0, 100, 255};
 constexpr Rgb kSafeCentre = {200, 255, 200};
 constexpr Rgb kSafeHigh = {255, 110, 0};
 // Palette 1, "Extreme" (device feedback 2026-10-22; ignores colour vision, Safe covers that): the sRGB primaries,
-// as far apart as possible: green centre; high = green -> yellow -> red, low = green -> cyan -> blue (three-stop
-// gradients, a = |t_e| in [0, 0.5] first half, [0.5, 1] second half; luminance-preserving mid-points, so the short
-// transition does not go through brown). Two more rules make it vivid:
-//  - steep ramp: the tendency is remapped t_e = sign(t) * clamp(|t| / kExtremeFullT, 0, 1) before the lookup, so
-//    the colour is fully red / blue from |t| = 0.3 (Medium: +-8.3 c instead of 15.5 c; the pure-green dead zone of
-//    biasT is unchanged);
+// as far apart as possible, as ONE continuous gradient over the whole range of the cell: lowest end = pure blue,
+// exact middle = pure green, highest end = pure red, with luminance-preserving mid-points (green -> cyan -> blue,
+// green -> yellow -> red; no brown). It is driven by biasTLinear (a signed LINEAR position, no dead-zone plateau
+// and no steep remap), not by biasT. A second rule keeps it vivid:
 //  - no dimming: a stained cell shows at least kExtremeMinDisplay of the colour, intensity 0.75 + 0.25 * display
 //    (Safe uses the plain display intensity). A never-stained cell stays black.
 constexpr Rgb kExtremeCentre = {0, 255, 0};
@@ -83,7 +81,6 @@ constexpr Rgb kExtremeHighMid = {255, 255, 0};
 constexpr Rgb kExtremeHigh = {255, 0, 0};
 constexpr Rgb kExtremeLowMid = {0, 255, 255};
 constexpr Rgb kExtremeLow = {0, 0, 255};
-constexpr float kExtremeFullT = 0.3f;
 constexpr float kExtremeMinDisplay = 0.75f;
 
 // ---- Frequency -> note (pure functions) -------------------------------------------------
@@ -106,10 +103,17 @@ float needlePct(float cents);   // (clamp(c,-50,50)+50)/100; 0 = flat edge of th
 // Signed tendency t in [-1, +1] (+ = sharp / high) from ToneMap's bias*() formulas: 0 while
 // |avgErrRatio * errScale| <= deadzone (and for NaN), else (|e'| - deadzone) / (spanMul * deadzone) clamped to 1.
 float biasT(Sensitivity s, float avgErrRatio);
-// Colour of palette `palette` (0 Safe, 1 Extreme; anything else is treated as 0) at tendency t, display
-// intensity 1. t is clamped to [-1, +1]; NaN gives the centre colour.
+// Colour of palette `palette` (0 Safe, 1 Extreme; anything else is treated as 0) at position t, display
+// intensity 1 (for Extreme t is the linear position of biasTLinear: green at 0, yellow / cyan at +-0.5, red / blue
+// at +-1). t is clamped to [-1, +1]; NaN gives the centre colour.
 Rgb paletteColor(int palette, float t);
-Rgb biasColor(int palette, Sensitivity s, float avgErrRatio);  // paletteColor(palette, biasT(s, avgErrRatio))
+// Signed LINEAR position over the whole range for the Extreme palette: clamp(e / (dz + span), -1, +1) with
+// e = avgErrRatio * errScale and dz + span = deadzone * (1 + spanMul) (Medium: blue .. green .. red across about
+// -15.5 .. 0 .. +15.5 c, Hard +-10.1 c, Relaxed +-18.5 c). No dead zone: exactly 0 (and NaN) is the centre.
+float biasTLinear(Sensitivity s, float avgErrRatio);
+// Colour of a cell with average error avgErrRatio: paletteColor(palette, biasT(...)) for Safe (dead zone) and
+// paletteColor(1, biasTLinear(...)) for Extreme.
+Rgb biasColor(int palette, Sensitivity s, float avgErrRatio);
 // Relative luminance 0..1 of an sRGB colour (Rec. 709 weights on the gamma-encoded channels, i.e. a
 // perceptual lightness proxy; linearised luminance would give white text on orange).
 float relLuminance(Rgb c);

@@ -52,14 +52,16 @@ constexpr uint32_t kFadePollMs = 500;    // redraw timer while some cell is fadi
 constexpr uint32_t kMessageMs = 1500;
 constexpr int kMenuPitch = 9;            // options overlay: line pitch (13 lines fit the 125 px canvas)
 constexpr int kMenuValueCols = 13;       // label column width in characters (value column)
-constexpr int kBracketArm = 5;           // active-cell corner brackets: arm length (incl. the corner) ...
-constexpr int kBracketThick = 2;         // ... and thickness, in px
+constexpr int kActiveBarH = 2;            // active-cell white bar along the bottom of the cell: height in px
 
 constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 constexpr uint16_t kColBlack = 0x0000;
 constexpr uint16_t kColWhite = 0xFFFF;
+// In the grid white belongs to the active cell only (its bar and its label). Every other label is black or this
+// light grey, chosen by the luminance of the colour of the cell.
+constexpr uint16_t kColLabelLight = rgb565(190, 190, 190);
 constexpr uint16_t kColGrid = rgb565(0x37, 0x41, 0x51);      // #374151
 constexpr uint16_t kColLabelOff = rgb565(0x4b, 0x55, 0x63);  // #4b5563 (never visited)
 constexpr uint16_t kColNeedle = rgb565(0xef, 0x44, 0x44);    // #ef4444
@@ -439,35 +441,24 @@ void drawCell(M5Canvas& c, int row, int col, uint32_t now, bool flats) {
     } else {
         strlcpy(label, flats ? kFlatNames[col] : kSharpNames[col], sizeof(label));
     }
-    // Visited: black or white by the luminance of the colour shown (the near-white centre of the Safe
-    // palette needs black text). Never visited: dim grey on black.
-    c.setTextColor(!visited ? kColLabelOff : (useBlackLabel(rgb) ? kColBlack : kColWhite));
+    // Active cell (the note sounding now): white. Other visited cells: black or light grey by the luminance of
+    // the colour shown (the near-white centre of the Safe palette needs black text). Never visited: dim grey on black.
+    const bool active = hasNote && writtenMidi == midi;
+    c.setTextColor(active ? kColWhite : (!visited ? kColLabelOff : (useBlackLabel(rgb) ? kColBlack : kColLabelLight)));
     c.drawString(label, x + 2, y + 2);
 }
 
-// One L-shaped mark in a cell corner: (cx, cy) is the corner pixel, (dx, dy) = (+-1, +-1) points into the cell.
-void drawCorner(M5Canvas& c, int cx, int cy, int dx, int dy, uint16_t col) {
-    const int hx = dx > 0 ? cx : cx - kBracketArm + 1;
-    const int hy = dy > 0 ? cy : cy - kBracketThick + 1;
-    c.fillRect(hx, hy, kBracketArm, kBracketThick, col);
-    const int vx = dx > 0 ? cx : cx - kBracketThick + 1;
-    const int vy = dy > 0 ? cy : cy - kBracketArm + 1;
-    c.fillRect(vx, vy, kBracketThick, kBracketArm, col);
-}
-
-void drawActiveCell(M5Canvas& c, uint32_t now) {
+// The active cell (the only place with white in the grid, besides its label): a white bar along the bottom of
+// the cell, kCellW - 1 wide (inside the grid line on the right) and kActiveBarH high, resting on the grid line at
+// the bottom edge; then the black reference line at the vertical centre and, last, the red needle, which stays
+// visible where it crosses the bar. No outline, no shadow.
+void drawActiveCell(M5Canvas& c, uint32_t /*now*/) {
     if (!hasNote || !inGrid(writtenMidi)) return;
     const int row = 7 - (writtenMidi / 12 - 1);  // octave 7 is the top row
     const int col = writtenMidi % 12;
     const int x = col * kCellW;
     const int y = kGridY + row * kCellH;
-    // Four corner brackets (black or white by the luminance of the colour shown, same rule as the label) leave
-    // the interior visible; then the black reference line at the vertical centre and the red needle on top.
-    const uint16_t mark = useBlackLabel(model.cellColor(writtenMidi, now, nullptr)) ? kColBlack : kColWhite;
-    drawCorner(c, x, y, 1, 1, mark);
-    drawCorner(c, x + kCellW - 1, y, -1, 1, mark);
-    drawCorner(c, x, y + kCellH - 1, 1, -1, mark);
-    drawCorner(c, x + kCellW - 1, y + kCellH - 1, -1, -1, mark);
+    c.fillRect(x, y + kCellH - 1 - kActiveBarH, kCellW - 1, kActiveBarH, kColWhite);
     c.fillRect(x + 2, y + kCellH / 2 - 1, kCellW - 4, 2, kColBlack);
     c.fillRect(x, y + needleRow(dispCents), kCellW, 2, kColNeedle);
 }

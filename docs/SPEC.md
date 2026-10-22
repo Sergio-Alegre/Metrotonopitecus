@@ -131,9 +131,10 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 - Líneas de cuadrícula 1 px `#374151`. Fondo `#000000`.
 - **Etiqueta:** solo el nombre de la nota (`C#`, o `Db` con bemoles); la columna C lleva además la octava
   (`C4`). Font0. Color `#4b5563` mientras la celda no se ha tocado nunca; una vez tocada (`visited`), **negro o
-  blanco según la luminancia relativa del color que muestra la celda** (0,2126 R + 0,7152 G + 0,0722 B sobre
-  los canales sRGB codificados, 0..1; mayor que 0,5 → negro, si no blanco), para que se lea sobre el casi
-  blanco del centro de la paleta Safe y sobre las celdas oscuras (desvanecidas o poco tocadas).
+  gris claro `(190,190,190)` según la luminancia relativa del color que muestra la celda** (0,2126 R + 0,7152 G +
+  0,0722 B sobre los canales sRGB codificados, 0..1; mayor que 0,5 → negro, si no gris claro), para que se lea sobre
+  el casi blanco del centro de la paleta Safe y sobre las celdas oscuras (desvanecidas o poco tocadas). **El blanco
+  puro solo lo usa la celda activa** (su etiqueta y su barra, ver abajo); en el resto de la cuadrícula no aparece.
 - **Color de fondo** = mezcla entre negro y el color de tendencia según la intensidad (§3.4). El modelo da la
   tendencia con signo `t` en [−1, +1] (+ = alto/sostenido, 0 = centro) y una **paleta** la convierte en color
   (todos los colores a intensidad plena; la mezcla con negro por la intensidad se mantiene):
@@ -142,22 +143,27 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
     RGB centro→alto y centro→bajo. Luminancia estrictamente ordenada centro > alto > bajo, así que también
     funciona en escala de grises.
   - **Extreme** (1; antes "Classic"; ignora el daltonismo, de eso se ocupa Safe): primarios puros lo más separados
-    posible en CIELAB (ΔE76 verde–azul 259, azul–rojo 176, verde–rojo 171); centro `rgb(0,255,0)`; alto = verde →
-    amarillo `(255,255,0)` → rojo `(255,0,0)`; bajo = verde → cian `(0,255,255)` → azul `(0,0,255)` (degradados de tres
-    tramos, con los puntos medios de luminancia máxima para no pasar por marrón). Dos reglas propias: **rampa
-    empinada** (la tendencia se remapea antes de buscar el color, `t_e = signo(t)·min(1, |t| / 0,3)`, así que el color es
-    rojo/azul pleno desde `|t|` = 0,3: ±9,9 c Relaxed, ±8,3 c Medium, ±4,4 c Hard; el verde puro de la zona muerta no
-    cambia y amarillo/cian salen en `|t|` = 0,15) y **sin atenuar** (una celda con sonido acumulado se pinta con
-    intensidad `0,75 + 0,25·display`, nunca por debajo del 75 %; las celdas visitadas pero nunca manchadas siguen
-    negras y las desvanecidas se quedan en `0,75 + 0,25·0,45` = 0,8625). Safe no cambia. Ver `TONEMAP_DESIGN.md` §13.7.
+    posible en CIELAB (ΔE76 verde–azul 259, azul–rojo 176, verde–rojo 171). Es **un único degradado continuo** sobre
+    todo el rango de la celda: extremo bajo = azul puro `(0,0,255)`, justo el centro = verde puro `(0,255,0)`, extremo alto
+    = rojo puro `(255,0,0)`, pasando por cian `(0,255,255)` y amarillo `(255,255,0)` a mitad de cada lado (los puntos
+    medios de luminancia máxima evitan el marrón). Sin meseta de verde ni saltos: la posición es lineal,
+    `t_lin = clamp(e' / (dz·(1 + span)), −1, +1)` con `e'` = error medio × `errScale` (`biasTLinear`; Safe sigue con la
+    zona muerta de `biasT`). En cents: azul/rojo pleno en ±18,5 (Relaxed), ±15,5 (Medium) y ±10,1 (Hard), amarillo/cian
+    en ±9,3 / ±7,8 / ±5,0. Además **sin atenuar** (una celda con sonido acumulado se pinta con intensidad
+    `0,75 + 0,25·display`, nunca por debajo del 75 %; las celdas visitadas pero nunca manchadas siguen negras y las
+    desvanecidas se quedan en `0,75 + 0,25·0,45` = 0,8625). Ver `TONEMAP_DESIGN.md` §13.7.
   - **Rampa** (más estrecha que en tonemap.live, decisión tras pruebas en dispositivo): centro puro hasta ±6,2 c
     (Relaxed), ±5,2 c (Medium), ±2,0 c (Hard); color pleno desde ±18,5 c, ±15,5 c y ±10,1 c respectivamente
     (`span` = 2·dz, 2·dz y 4·dz). Intensidad plena a los **250 ms** de sonido acumulado, y el desvanecido baja
     hasta **0,45** de la intensidad base (ToneMap: 500 ms y 0,25). Ver `TONEMAP_DESIGN.md` §13.
-- **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): **cuatro esquinas** en L (brazos de
-  5 px, 2 px de grosor) en negro o blanco según la misma regla de luminancia que la etiqueta, para dejar visible
-  el interior de la celda (20 × 18 px); una línea de referencia negra de 2 px en el centro vertical de la celda
-  y la **aguja**: barra roja `#ef4444` de 2 px de alto a lo ancho de la celda. Posición vertical: arriba = alto.
+- **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2). El blanco solo existe aquí y en dos
+  sitios: (a) una **barra blanca** de 2 px de alto a lo ancho de la celda por dentro de las líneas de cuadrícula
+  (19 px: x..x+18) apoyada sobre el borde inferior (filas y+15 e y+16 de la celda de 20 × 18; la línea de cuadrícula
+  inferior es la fila y+17); y (b) la **etiqueta con el nombre de la nota en blanco**. Sin contorno ni sombra. Después,
+  una línea de referencia negra de 2 px en el centro vertical de la celda y, la última, la **aguja**: barra roja
+  `#ef4444` de 2 px de alto a lo ancho de la celda (queda visible donde cruza la barra blanca). Al dejar de ser activa,
+  la etiqueta vuelve a negro / gris claro. Riesgo conocido: sobre el casi blanco del centro de Safe `(200,255,200)` la
+  barra y la etiqueta blancas contrastan poco. Posición vertical: arriba = alto.
   Recorrido del 10 % al 90 % de la altura para −50…+50 cents (fórmula en §3.5).
 
 #### Franja de información (fila superior)
