@@ -121,6 +121,8 @@ public:
         dirty_ = true;
     }
 
+    bool acceptsAlt() const override { return tm_; }  // Alt opens the ToneMap options overlay
+
     void afterPush() override {
         if (tm_) tonemap::afterPush();
     }

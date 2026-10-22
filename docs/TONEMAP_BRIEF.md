@@ -614,3 +614,5 @@ tonemap.live y a las secciones anteriores (el detalle y la justificación están
   (`STAIN_MIN_FRACTION`, antes 0,25) (§3.4).
 - El firmware normal (`cardputer-adv`) no tiene ninguna línea ni superposición de depuración: eso solo existe en
   `cardputer-adv-tonemap-debug`.
+- **Panel de opciones** (2026-10-22, segunda tanda): `Alt` o `Enter` abre/cierra una superposición a pantalla completa con las
+  teclas y sus valores actuales (`SPEC.md`, `TONEMAP_DESIGN.md` §13.5). Pista `Alt:menu` en la franja de info cuando cabe.

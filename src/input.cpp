@@ -82,6 +82,7 @@ void poll() {
     }
     if (st.enter && n < kMaxHeld) cur[n++] = {Key::Enter, 0};
     if (st.del && n < kMaxHeld) cur[n++] = {Key::Del, 0};
+    if (st.alt && n < kMaxHeld) cur[n++] = {Key::Alt, 0};  // not repeatable: repeatable() is false for it
 
     const uint32_t now = millis();
     Held nextHeld[kMaxHeld];

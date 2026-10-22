@@ -166,9 +166,22 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 | `F` | Sostenidos ↔ bemoles en etiquetas y franja |
 | `L` | LED de afinado on/off |
 | `P` | Paleta de colores: Safe ↔ Classic (solo redibuja: no reinicia temporizadores ni toca datos). No es tecla global |
+| `Alt` o `Enter` | Abre / cierra el **panel de opciones** (ver abajo) |
 | `R` | Borrar el mapa (todas las celdas) |
 | `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
 | Izquierda / Derecha | Sin uso en la v1 (reservadas para temperamentos en el futuro) |
+
+**Panel de opciones** (`Alt` o `Enter`, alterna): superposición opaca a pantalla completa (240 × 125, Font0, 13 líneas de
+9 px) con el título `OPTIONS` y `Alt/Enter: close`, y una línea por tecla con su **valor actual**: `S Sensitivity`,
+`H History`, `C Color hold`, `N Noise gate`, `K Transpose`, `F Accidentals`, `P Palette`, `L LED` (con los mismos textos
+que los mensajes transitorios) y, sin valor, `R Clear map`, `Space Pause` / `Space Resume` (según el estado),
+`Up/Down  A=442 (reference)` y `T Classic view`. Mientras está abierto, las teclas del mapa siguen funcionando y los valores
+se actualizan al instante; la captura, el análisis, el LED y el modelo siguen corriendo debajo, y al cerrar se redibuja el
+mapa entero. Solo se redibuja al pulsar una tecla (sin coste por fotograma). Siempre está cerrado al entrar en la vista;
+`T`, `M`, `G`, `A` funcionan como siempre y lo cierran al salir. `Alt` solo lo recibe la vista ToneMap (`main.cpp` no se lo
+pasa a ningún otro modo). **Sin verificar en el dispositivo** que el teclado informe `Alt` solo; `Enter` es el recurso seguro.
+En la franja de info, a la izquierda de `A=…` (y de la transposición), aparece la pista `Alt:menu` en gris tenue, o `Alt` si no
+cabe entero, o nada si choca con el bloque nota / cents / Hz o con un mensaje.
 
 Las teclas globales (`M`, `G`, `A`, `-`, `=`) las sigue capturando `main.cpp` antes que el modo: no usar esas letras.
 

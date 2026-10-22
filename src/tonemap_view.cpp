@@ -54,6 +54,8 @@ constexpr uint32_t kMinDrawGapMs = 50;   // 20 fps
 constexpr uint32_t kOverdueMs = 80;      // a pending frame is drawn even right after an analysis
 constexpr uint32_t kFadePollMs = 500;    // redraw timer while some cell is fading
 constexpr uint32_t kMessageMs = 1500;
+constexpr int kMenuPitch = 9;            // options overlay: line pitch (13 lines fit the 125 px canvas)
+constexpr int kMenuValueCols = 13;       // label column width in characters (value column)
 constexpr int kBracketArm = 5;           // active-cell corner brackets: arm length (incl. the corner) ...
 constexpr int kBracketThick = 2;         // ... and thickness, in px
 
@@ -107,6 +109,7 @@ bool paused = false;
 uint32_t pauseStart = 0;
 
 bool active = false;       // between enter() and leave()
+bool menuOpen = false;     // options overlay (Alt / Enter); always closed on enter() and leave()
 bool micOk = false;
 bool dirty = true;
 bool analysedThisLoop = false;
@@ -356,7 +359,8 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
     lastWindowMs = millis();
     analysedThisLoop = true;
 
-    if (!sameSnapshot(makeSnapshot(), drawn)) dirty = true;
+    // While the options overlay is open only key presses redraw (it shows no analysis data).
+    if (!menuOpen && !sameSnapshot(makeSnapshot(), drawn)) dirty = true;
 
 #ifdef TONEMAP_DEBUG
     const uint32_t us = micros() - t0;
@@ -425,7 +429,7 @@ void debugPeriod(uint32_t now) {
         (double)dbg.pubPushMs, (double)dbg.pubFps, (double)dbg.pubLoopMs, (double)dbg.rms, (double)dbg.clar,
         (double)dbg.hz, dbg.note, (double)dbg.cents, kGateNames[gateIdx()], (unsigned)st.starved, (unsigned)st.torn,
         (unsigned)st.skipped, (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap());
-    dirty = true;  // refresh the overlay
+    if (!menuOpen) dirty = true;  // refresh the overlay
 }
 
 void debugOverlay(M5Canvas& c) {
@@ -503,25 +507,32 @@ void drawStrip(M5Canvas& c) {
     c.setTextSize(1);
     c.setTextDatum(top_left);
 
-    // Left: transient message > pause > microphone error > note, cents, Hz.
+    // Left: transient message > pause > microphone error > note, cents, Hz. leftEnd = right edge in px.
+    int leftEnd = 2;
     if (msgActive) {
         c.setTextColor(kColInfo);
         c.drawString(msgText, 2, kTextY);
+        leftEnd = 2 + c.textWidth(msgText);
     } else if (paused) {
         c.setTextColor(kColPaused);
         c.drawString("Paused (Space)", 2, kTextY);
+        leftEnd = 2 + c.textWidth("Paused (Space)");
     } else if (!micOk) {
         c.setTextColor(kColError);
         c.drawString("Microphone unavailable", 2, kTextY);
+        leftEnd = 2 + c.textWidth("Microphone unavailable");
     } else if (!hasNote) {
         c.setTextColor(kColDim);
         c.drawString("--", 2, kTextY);
+        leftEnd = 2 + c.textWidth("--");
     } else if (writtenMidi < kGridLo) {
         c.setTextColor(kColGrey);
         c.drawString("Below range", 2, kTextY);
+        leftEnd = 2 + c.textWidth("Below range");
     } else if (writtenMidi > kGridHi) {
         c.setTextColor(kColGrey);
         c.drawString("Above range", 2, kTextY);
+        leftEnd = 2 + c.textWidth("Above range");
     } else {
         char buf[16];
         noteName(writtenMidi, flats, buf, sizeof(buf));
@@ -537,6 +548,7 @@ void drawStrip(M5Canvas& c) {
         snprintf(buf, sizeof(buf), "%.1f Hz", (double)noteHz);
         c.setTextColor(kColGrey);
         c.drawString(buf, 70, kTextY);
+        leftEnd = 70 + c.textWidth(buf);
     }
 
     // Right: transposition (if not C), A reference, level meter with the gate mark.
@@ -546,11 +558,30 @@ void drawStrip(M5Canvas& c) {
     const int refRight = kMeterX - 6;
     c.setTextColor(kColRefA);
     c.drawString(ref, refRight, kTextY);
+    int rightStart = refRight - c.textWidth(ref);  // left edge of the right-hand block
     if (s.tmTransp != 0) {
+        const char* tn = kTranspNames[transpIndex(s.tmTransp)];
         c.setTextColor(kColTransp);
-        c.drawString(kTranspNames[transpIndex(s.tmTransp)], refRight - (int)strlen(ref) * 6 - 6, kTextY);
+        c.drawString(tn, refRight - (int)strlen(ref) * 6 - 6, kTextY);
+        rightStart -= 6 + c.textWidth(tn);
     }
     c.setTextDatum(top_left);
+
+    // Hint for the options overlay, just left of the right-hand block, only where it does not collide with
+    // the note / cents / Hz block (4 px margin on both sides). Full "Alt:menu" (48 px), else "Alt" (18 px).
+    {
+        const int hintRight = rightStart - 4;
+        const char* hint = nullptr;
+        if (hintRight - c.textWidth("Alt:menu") >= leftEnd + 4) {
+            hint = "Alt:menu";
+        } else if (hintRight - c.textWidth("Alt") >= leftEnd + 4) {
+            hint = "Alt";
+        }
+        if (hint) {
+            c.setTextColor(kColDim);
+            c.drawString(hint, hintRight - c.textWidth(hint), kTextY);
+        }
+    }
 
     c.fillRect(kMeterX, kMeterY, kMeterW, kMeterH, kColMeterBg);
     const int px = (micOk && !paused) ? meterPixels(level) : 0;
@@ -564,6 +595,53 @@ void drawStrip(M5Canvas& c) {
     c.drawFastHLine(0, kSepY, 240, kColGrid);
 }
 
+// ---- options overlay (Alt / Enter) ---------------------------------------------------------------------
+// One line of the overlay: key (yellow), label (grey), optional current value (white) in a fixed column.
+void drawMenuRow(M5Canvas& c, int row, const char* key, const char* label, const char* value) {
+    const int y = 2 + row * kMenuPitch;
+    int x = 4;
+    c.setTextColor(kColRefA);
+    c.drawString(key, x, y);
+    x += (int)strlen(key) * 6 + 6;
+    c.setTextColor(kColGrey);
+    c.drawString(label, x, y);
+    if (value) {
+        c.setTextColor(kColWhite);
+        c.drawString(value, x + kMenuValueCols * 6, y);
+    }
+}
+
+// Full-canvas overlay with the keys and their CURRENT values (13 lines of Font0, <= 40 characters each).
+void drawMenu(M5Canvas& c) {
+    const auto& s = settings::get();
+    c.fillSprite(kColBlack);
+    c.setFont(&fonts::Font0);
+    c.setTextSize(1);
+    c.setTextDatum(top_left);
+
+    c.setTextColor(kColInfo);
+    c.drawString("OPTIONS", 4, 2);
+    c.setTextDatum(top_right);
+    c.setTextColor(kColDim);
+    c.drawString("Alt/Enter: close", 236, 2);
+    c.setTextDatum(top_left);
+
+    drawMenuRow(c, 1, "S", "Sensitivity", kSensNames[clampi(s.tmSens, 0, 2)]);
+    drawMenuRow(c, 2, "H", "History", kHistNames[clampi(s.tmHist, 0, 3)]);
+    drawMenuRow(c, 3, "C", "Color hold", kHoldNames[clampi(s.tmHold, 0, 5)]);
+    drawMenuRow(c, 4, "N", "Noise gate", kGateNames[clampi(s.tmGate, 0, 3)]);
+    drawMenuRow(c, 5, "K", "Transpose", kTranspNames[transpIndex(s.tmTransp)]);
+    drawMenuRow(c, 6, "F", "Accidentals", s.tmFlats ? "flats" : "sharps");
+    drawMenuRow(c, 7, "P", "Palette", kPaletteNames[clampi(s.tmPalette, 0, 1)]);
+    drawMenuRow(c, 8, "L", "LED", s.tmLed ? "on" : "off");
+    drawMenuRow(c, 9, "R", "Clear map", nullptr);
+    drawMenuRow(c, 10, "Space", paused ? "Resume" : "Pause", nullptr);
+    char ref[32];
+    snprintf(ref, sizeof(ref), " A=%.0f (reference)", (double)s.refA);
+    drawMenuRow(c, 11, "Up/Down", ref, nullptr);
+    drawMenuRow(c, 12, "T", "Classic view", nullptr);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------------------
@@ -572,6 +650,7 @@ void drawStrip(M5Canvas& c) {
 void enter() {
     if (active) leave();
     active = true;
+    menuOpen = false;
     Serial.println("[tonemap] enter");
 
     // The mic is ended on every entry path; be safe if it is not (attach() needs it stopped).
@@ -610,6 +689,7 @@ void enter() {
 void leave() {
     if (!active) return;
     active = false;
+    menuOpen = false;
     Serial.println("[tonemap] leave");
 
     tonemap_audio::stop();
@@ -644,6 +724,10 @@ void onKey(const KeyEvent& e) {
         }
         case Key::Space:
             setPaused(!paused);
+            break;
+        case Key::Alt:
+        case Key::Enter:
+            menuOpen = !menuOpen;  // options overlay; the dirty flag below forces a full redraw either way
             break;
         case Key::Char:
             switch (e.ch) {
@@ -713,7 +797,7 @@ void onKey(const KeyEvent& e) {
             }
             break;
         default:
-            break;  // Left / Right / Enter / Del: unused in v1
+            break;  // Left / Right / Del: unused in v1
     }
     dirty = true;
 }
@@ -760,7 +844,7 @@ void update() {
     // Fades change colours without any new audio: poll the model while some cell is fading.
     if (!paused && (uint32_t)(now - lastFadePollMs) >= kFadePollMs) {
         lastFadePollMs = now;
-        if (model.anyFading(mapNow())) dirty = true;
+        if (!menuOpen && model.anyFading(mapNow())) dirty = true;
     }
 
 #ifdef TONEMAP_DEBUG
@@ -786,18 +870,22 @@ bool draw(M5Canvas& c, bool force) {
     const uint32_t mnow = mapNow();
     const bool flats = settings::get().tmFlats != 0;
 
-    c.fillSprite(kColBlack);
-    c.setFont(&fonts::Font0);
-    c.setTextSize(1);
-    c.setTextDatum(top_left);
-    for (int row = 0; row < kRows; ++row) {
-        for (int col = 0; col < kCols; ++col) drawCell(c, row, col, mnow, flats);
-    }
-    drawActiveCell(c, mnow);
-    drawStrip(c);
+    if (menuOpen) {
+        drawMenu(c);
+    } else {
+        c.fillSprite(kColBlack);
+        c.setFont(&fonts::Font0);
+        c.setTextSize(1);
+        c.setTextDatum(top_left);
+        for (int row = 0; row < kRows; ++row) {
+            for (int col = 0; col < kCols; ++col) drawCell(c, row, col, mnow, flats);
+        }
+        drawActiveCell(c, mnow);
+        drawStrip(c);
 #ifdef TONEMAP_DEBUG
-    debugOverlay(c);
+        debugOverlay(c);
 #endif
+    }
 
     drawn = makeSnapshot();
 

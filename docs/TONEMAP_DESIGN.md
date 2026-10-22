@@ -741,3 +741,25 @@ Toda la superposición (`debugOverlay`), la línea serie `[tm]` y los contadores
 define `cardputer-adv-tonemap-debug`. Se comprobó que `cardputer-adv` (y `-debug`, `-led-debug`) no contienen en el
 binario las cadenas `a/s%.1f`, `[tm] an/s` ni `starved=`. Los avisos de ciclo de vida `[tonemap] enter/leave/paused`
 por serie se mantienen en todos los entornos (no se dibujan en pantalla).
+
+### 13.5 Panel de opciones (Alt / Enter)
+
+- **Entrada:** `Key::Alt` nuevo en `input.h`; `input::poll()` lo emite desde `keysState().alt` con el mismo patrón que
+  `enter`/`del` (un evento por pulsación, no repetible). Para no cambiar el comportamiento de otros modos (el metrónomo,
+  por ejemplo, cancela el tap con cualquier otra tecla), `Mode::acceptsAlt()` (falso por defecto) y `main.cpp` descartan
+  `Alt` salvo en el afinador con la vista ToneMap (`TunerMode::acceptsAlt()` devuelve `tm_`).
+- **Vista:** `menuOpen` (cerrado en `enter()`/`leave()`). `Alt` o `Enter` alterna. Abierto, `draw()` pinta `drawMenu()` en
+  lugar del mapa y la franja: fondo negro, título `OPTIONS` + `Alt/Enter: close` a la derecha, y 12 líneas a 9 px de paso
+  (`S`, `H`, `C`, `N`, `K`, `F`, `P`, `L` con valor en la columna de 13 caracteres tras la etiqueta; `R`, `Space` + `Pause`/`Resume`,
+  `Up/Down  A=<refA> (reference)`, `T Classic view`). Las teclas siguen llamando a los mismos manejadores, así que los valores
+  se actualizan en vivo; el mensaje transitorio no se muestra.
+- **Coste:** cerrado, nada cambia. Abierto, el análisis, el sondeo del desvanecido y el período de depuración no marcan
+  `dirty`; solo las teclas. Al cerrar, `dirty = true` y se repinta todo el mapa (límite de 20 fps intacto).
+- **Pista de la franja:** `Alt:menu` (48 px, gris tenue) a la izquierda de la transposición/`A=…`, con margen de 4 px a cada
+  lado. Se calcula el borde derecho del bloque izquierdo con `textWidth`. Casos: `A=480` sin transposición (bloque derecho desde
+  x=170): `Alt:menu` cabe si el bloque izquierdo acaba en x ≤ 114 (`440.0 Hz` acaba en 118: sale `Alt`; `98.0 Hz`, `--`, `Below range`:
+  completo). Con `Bb` (desde x=152): completo solo si acaba en ≤ 96 (`--`, `Below range`, `Paused (Space)`); con nota y 3951,0 Hz
+  (acaba en 124) sale `Alt` (x 130..148). Mensajes de 20 caracteres (acaban en 122): `Alt`. `Microphone unavailable` (134) con
+  transposición: nada. Nunca toca el medidor (x ≥ 206).
+- **No verificado sin el dispositivo:** que la matriz del teclado informe `Alt` pulsada sola (en M5Cardputer es un modificador;
+  `keysState().alt` se activa en `updateKeysState`, pero no se ha probado). `Enter` es el recurso seguro.

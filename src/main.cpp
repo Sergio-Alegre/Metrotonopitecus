@@ -78,6 +78,7 @@ void changeVolume(int delta) {
 }
 
 void handleKey(const KeyEvent& e) {
+    if (e.key == Key::Alt && !current->acceptsAlt()) return;  // only the ToneMap view uses Alt
     if (e.key == Key::Char) {
         if (e.ch == '-' || e.ch == '_') return changeVolume(-1);
         if (e.ch == '=' || e.ch == '+') return changeVolume(+1);

@@ -45,4 +45,7 @@ public:
 
     // Called when the mode's own hotkey is pressed while it is already active.
     virtual void onReselect() {}
+
+    // main.cpp only forwards Key::Alt to a mode that asks for it (the other modes never see it).
+    virtual bool acceptsAlt() const { return false; }
 };
