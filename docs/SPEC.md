@@ -37,6 +37,9 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
   activo resaltado, volumen a la derecha.
 - Teclas globales: `M` metrónomo, `T` afinador, `G` juego, `A` extra (nombre por decidir; de momento "About").
 - Volumen global (clic del metrónomo y nota de referencia): `-`/`_` baja, `=`/`+` sube.
+- Sonido del clic del metrónomo: todos los clics a 1400 Hz; la importancia se marca con el volumen (ganancia por clic sobre el
+  volumen global) y algo con la duración: primer pulso del compás 100 % y 36 ms, resto de pulsos 55 % y 30 ms,
+  subdivisiones 31 % y 18 ms (constantes `kGain*`/`kMs*` en `mode_metronome.cpp`, a ajustar de oído).
 - Cursores = teclas `;` (arriba) `,` (izquierda) `.` (abajo) `/` (derecha), con o sin Fn.
 - Se persisten en NVS: volumen, BPM, subdivisión, nota objetivo y La de referencia.
 

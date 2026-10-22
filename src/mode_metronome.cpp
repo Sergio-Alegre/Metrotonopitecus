@@ -133,16 +133,25 @@ void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
     }
 }
 
-// Same synth tone for the three clicks, falling in pitch with importance. The speaker is
-// weak at low pitches and short beeps sound faint (the subdivision got unclear from volume 5),
-// so the pitches are kept close together and high, and all three last 30 ms.
+// All clicks use the same pitch; importance is carried by loudness (per-click gain relative to the
+// global volume) and, slightly, by length: the bar accent is the loudest and longest, the other beats
+// are softer, and subdivisions are the quietest and shortest. The speaker is weak and very short beeps
+// sound faint, so subdivisions are kept at 18 ms and 31 % gain; tune the constants below by ear.
+constexpr float kClickHz = 1400.0f;
+constexpr uint8_t kGainAccent = 255;
+constexpr uint8_t kGainBeat = 140;
+constexpr uint8_t kGainSub = 80;
+constexpr uint32_t kMsAccent = 36;
+constexpr uint32_t kMsBeat = 30;
+constexpr uint32_t kMsSub = 18;
+
 void fireClick(int idx, int sub) {
     if (idx == 0) {
-        audio::click(1800.0f, 30);  // bar accent
+        audio::click(kClickHz, kMsAccent, kGainAccent);  // bar accent (first beat)
     } else if (idx % sub == 0) {
-        audio::click(1600.0f, 30);  // beat
+        audio::click(kClickHz, kMsBeat, kGainBeat);  // other beats
     } else {
-        audio::click(1200.0f, 30);  // subdivision
+        audio::click(kClickHz, kMsSub, kGainSub);  // subdivision
     }
 }
 
