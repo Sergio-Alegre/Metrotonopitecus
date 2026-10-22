@@ -56,9 +56,6 @@ constexpr int kSubArrowDx = 33;
 constexpr int kLedPin = 21;
 void ledSet(uint8_t r, uint8_t g, uint8_t b) { neopixelWrite(kLedPin, r, g, b); }
 
-// Beat circle colour on the screen (the LED itself uses pure blue); lighter than pure blue to stay legible on black.
-const uint16_t kBeatBlue = 0x041F;  // rgb(0,128,255)
-
 std::atomic<bool> gRunning{false};
 std::atomic<int> gBpm{100};
 std::atomic<int> gSub{1};
@@ -320,8 +317,8 @@ public:
     }
 
     // Flash the RGB LED at the instant the new frame is on screen: white on the bar accent,
-    // blue on the other beats (colour-vision-deficiency safe, unlike red/green), same colours
-    // as the circles. The flash lasts 1/5 of the beat, limited to 30..80 ms, so it is a constant
+    // green on the other beats (white/green stays distinguishable for all three types of colour
+    // vision deficiency, unlike red/green), same colours as the circles. The flash lasts 1/5 of the beat, limited to 30..80 ms, so it is a constant
     // 80 ms up to 150 BPM and shrinks for fast tempos (66 ms at 180, 54 at 220, 40 at 300).
     // The accent flash is 1.5x longer, a cue that does not depend on colour at all.
     void afterPush() override {
@@ -334,7 +331,7 @@ public:
             flashMs = flashMs * 3 / 2;
             showLed(255, 255, 255);
         } else {
-            showLed(0, 0, 255);
+            showLed(0, 255, 0);
         }
         ledOn_ = true;
         ledOffAt_ = millis() + flashMs;
@@ -383,7 +380,7 @@ public:
         for (int i = 0; i < beats; ++i) {
             // Left-justified: the first beat stays put, more beats extend to the right.
             const int x = kMargin + kBeatRadius + i * kBeatSpacing;
-            const uint16_t col = (i == 0) ? WHITE : kBeatBlue;  // accent white, other beats blue (as the LED)
+            const uint16_t col = (i == 0) ? WHITE : GREEN;  // accent white, other beats green (as the LED)
             if (i == beat) {
                 c.fillCircle(x, kBottomY, kBeatRadius, col);
             } else {
