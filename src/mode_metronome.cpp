@@ -42,12 +42,17 @@ constexpr int kHintBottomY = kBottomY + kBeatRadius + 1;  // bottom of the hint'
 // The tempo block (number, arrows) and the subdivision move together, anchored to the
 // vertical centre of the tempo number.
 constexpr int kRowY = 57;
-// The tempo number and the subdivision figure are 20 % larger than the original design (kRowY's 48 px tall number,
+// The tempo number and the subdivision figure are 20 % larger than the original design (a 48 px tall number,
 // 24 px stems). They grow like a balloon anchored at the floor and at the outer side: the number's bottom stays at
 // kRowY + 24, its left edge at kMargin, the figure's heads stay on the same floor and the right arrow stays put, so
 // the extra size goes up and towards the centre.
-constexpr float kNumScale = 1.2f;
-constexpr int kNumCy = kRowY + 24 - (int)(24 * kNumScale + 0.5f);  // centre of the scaled number (same bottom)
+// The tempo digits are drawn as seven-segment glyphs (see drawDigit) instead of the scaled Font7, whose bitmap
+// looks uneven at a non-integer scale.
+constexpr int kDigitW = 36;
+constexpr int kDigitH = 58;
+constexpr int kDigitGap = 5;
+constexpr int kSegT = 6;          // segment thickness
+constexpr int kNumTopY = kRowY + 24 - kDigitH;
 constexpr int kArrowsTopY = kRowY + 8;  // top of the Up/Down arrows next to the number
 // Vertical centre of the note heads: their bottom (centre + 3) sits on the same line as
 // the bottom of the tempo number.
@@ -70,6 +75,40 @@ std::atomic<int> gBeats{4};
 std::atomic<uint32_t> gClickUs{0};  // esp_timer time (low 32 bits, us) of the last click
 std::atomic<uint32_t> gSeq{0};  // clicks fired since boot
 std::atomic<int> gTickIdx{0};   // index of the last click inside the bar
+
+// Seven-segment digit with its top-left corner at (x, y), kDigitW x kDigitH px. Every segment is a flat hexagon
+// (the bevelled ends shrink by 1 and 2 px on its outer rows), with a 1-2 px gap to its neighbours.
+//   a/g/d: horizontal segments at rows 0, 26 and 52; b/c/e/f: vertical segments at columns 0 and kDigitW - kSegT.
+void hSeg(M5Canvas& c, int x, int y, uint16_t col) {  // tips at x+4 .. x+kDigitW-5
+    for (int r = 0; r < kSegT; ++r) {
+        const int inset = 2 - min(r, kSegT - 1 - r);
+        c.fillRect(x + 4 + inset, y + r, kDigitW - 8 - 2 * inset, 1, col);
+    }
+}
+
+void vSeg(M5Canvas& c, int x, int y, int len, uint16_t col) {  // top tip at y, len rows long
+    for (int q = 0; q < kSegT; ++q) {
+        const int inset = 2 - min(q, kSegT - 1 - q);
+        c.fillRect(x + q, y + inset, 1, len - 2 * inset, col);
+    }
+}
+
+void drawDigit(M5Canvas& c, int x, int y, int d, uint16_t col) {
+    // bit order: a b c d e f g
+    static const uint8_t kSegments[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+    const uint8_t m = kSegments[d];
+    const int right = x + kDigitW - kSegT;
+    if (m & 0x01) hSeg(c, x, y, col);
+    if (m & 0x40) hSeg(c, x, y + 26, col);
+    if (m & 0x08) hSeg(c, x, y + 52, col);
+    if (m & 0x20) vSeg(c, x, y + 4, 24, col);
+    if (m & 0x02) vSeg(c, right, y + 4, 24, col);
+    if (m & 0x10) vSeg(c, x, y + 30, 24, col);
+    if (m & 0x04) vSeg(c, right, y + 30, 24, col);
+}
+
+// Width of a tempo number made of n digits.
+constexpr int numberWidth(int n) { return n * kDigitW + (n - 1) * kDigitGap; }
 
 // Note head: a filled ellipse tilted so its right end rises (like engraved notation),
 // drawn pixel by pixel because the canvas has no rotated ellipse. Returns the column of
@@ -133,10 +172,10 @@ void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
         if (sub == 4) c.fillRect(firstStem, top + 5, width, 2, col);  // second beam
     }
     if (sub == 3) {
-        c.setFont(&fonts::Font0);
+        c.setFont(&fonts::Font2);
         c.setTextDatum(bottom_center);
         c.setTextColor(col);
-        c.drawString("3", (firstStem + lastStem) / 2, top - 3);
+        c.drawString("3", (firstStem + lastStem) / 2, top - 2);
     }
 }
 
@@ -368,15 +407,12 @@ public:
         const bool typing = entry_.length() > 0;
         const bool provisional = typing || tapOpen_;
         const String tempo = typing ? entry_ : String(s.bpm);
-        c.setFont(&fonts::Font7);
-        c.setTextSize(kNumScale);
-        const int slotW = c.textWidth("000");
+        const int slotW = numberWidth(3);
         const int numCx = kMargin + slotW / 2;
-        c.setTextDatum(middle_center);
-        c.setTextColor(provisional ? YELLOW : WHITE);
-        c.drawString(tempo, numCx, kNumCy);
-        const int numberW = c.textWidth(tempo);
-        c.setTextSize(1);
+        const int numberW = numberWidth(tempo.length());
+        const uint16_t numCol = provisional ? YELLOW : WHITE;
+        int dx = numCx - numberW / 2;
+        for (size_t i = 0; i < tempo.length(); ++i, dx += kDigitW + kDigitGap) drawDigit(c, dx, kNumTopY, tempo[i] - '0', numCol);
 
         // Up/Down arrows (same cue as the tuner's reference A), same colour as the number
         ui::drawUpDown(c, numCx + numberW / 2 + 9, kArrowsTopY, provisional ? YELLOW : LIGHTGREY);
