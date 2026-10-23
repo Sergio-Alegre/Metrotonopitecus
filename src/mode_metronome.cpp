@@ -42,14 +42,21 @@ constexpr int kHintBottomY = kBottomY + kBeatRadius + 1;  // bottom of the hint'
 // The tempo block (number, arrows) and the subdivision move together, anchored to the
 // vertical centre of the tempo number.
 constexpr int kRowY = 62;
+// The tempo number and the subdivision figure are 20 % larger than the original design (kRowY's 48 px tall number,
+// 24 px stems). They grow like a balloon anchored at the floor and at the outer side: the number's bottom stays at
+// kRowY + 24, its left edge at kMargin, the figure's heads stay on the same floor and the right arrow stays put, so
+// the extra size goes up and towards the centre.
+constexpr float kNumScale = 1.2f;
+constexpr int kNumCy = kRowY + 24 - (int)(24 * kNumScale + 0.5f);  // centre of the scaled number (same bottom)
 constexpr int kArrowsTopY = kRowY + 8;  // top of the Up/Down arrows next to the number
 // Vertical centre of the note heads: their bottom (centre + 3) sits on the same line as
 // the bottom of the tempo number.
-constexpr int kSubBaseY = kRowY + 17;
-constexpr int kSubCx = 196;       // horizontal centre of the subdivision figure
-// Four sixteenths span x-20..x+21 around the centre; the arrow glyphs are ~10 px wide
-// and sit about 7 px outside that.
-constexpr int kSubArrowDx = 33;
+// (the scaled heads reach one row lower, hence 16 instead of 17).
+constexpr int kSubBaseY = kRowY + 16;
+constexpr int kSubCx = 192;       // horizontal centre of the subdivision figure
+// Four sixteenths span about x-25..x+26 around the centre; the arrow glyphs are ~10 px wide
+// and sit about 7 px outside that. The right arrow stays at x = 229.
+constexpr int kSubArrowDx = 37;
 
 // The Cardputer ADV's RGB LED (SK6812) is on GPIO21. M5Unified's M5.Led does nothing with this
 // Arduino core (it needs ESP-IDF 5), so it is driven with the core's own neopixelWrite().
@@ -73,8 +80,8 @@ struct HeadEdge {
 };
 
 HeadEdge drawHead(M5Canvas& c, int hx, int hy, uint16_t col) {
-    constexpr float kA = 4.8f;                  // semi-axis along the tilt
-    constexpr float kB = 3.2f;                  // semi-axis across it
+    constexpr float kA = 5.76f;                 // semi-axis along the tilt
+    constexpr float kB = 3.84f;                 // semi-axis across it
     constexpr float kTilt = 30.0f * PI / 180.0f;
     const float cs = cosf(kTilt);
     const float sn = sinf(kTilt);
@@ -85,13 +92,13 @@ HeadEdge drawHead(M5Canvas& c, int hx, int hy, uint16_t col) {
     };
 
     int right = -100;
-    for (int dy = -6; dy <= 6; ++dy)
-        for (int dx = -7; dx <= 7; ++dx)
+    for (int dy = -8; dy <= 8; ++dy)
+        for (int dx = -9; dx <= 9; ++dx)
             if (inside(dx, dy) && dx > right) right = dx;
 
     int lowest = -100;
-    for (int dy = -6; dy <= 6; ++dy) {
-        for (int dx = -7; dx <= 7; ++dx) {
+    for (int dy = -8; dy <= 8; ++dy) {
+        for (int dx = -9; dx <= 9; ++dx) {
             if (!inside(dx, dy)) continue;
             c.drawPixel(hx + dx, hy + dy, col);
             if (dx == right && dy > lowest) lowest = dy;
@@ -105,8 +112,8 @@ HeadEdge drawHead(M5Canvas& c, int hx, int hy, uint16_t col) {
 // cx: horizontal centre, base: y of the note heads' centre.
 // Strokes are thin: 1 px stems (flush with the right edge of the head), 2 px beams.
 void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
-    constexpr int kStem = 24;  // ~3.5 head heights (an octave on a staff); heads are ~7 px tall
-    constexpr int kSpacing[] = {0, 0, 14, 14, 11};
+    constexpr int kStem = 29;  // ~3.5 head heights (an octave on a staff); heads are ~9 px tall
+    constexpr int kSpacing[] = {0, 0, 17, 17, 13};
     const int n = sub;  // number of notes equals the subdivision
     const int span = kSpacing[sub] * (n - 1);
     const int x0 = cx - span / 2;
@@ -123,7 +130,7 @@ void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
     if (n > 1) {
         const int width = lastStem - firstStem + 1;
         c.fillRect(firstStem, top, width, 2, col);  // main beam
-        if (sub == 4) c.fillRect(firstStem, top + 4, width, 2, col);  // second beam
+        if (sub == 4) c.fillRect(firstStem, top + 5, width, 2, col);  // second beam
     }
     if (sub == 3) {
         c.setFont(&fonts::Font0);
@@ -362,12 +369,14 @@ public:
         const bool provisional = typing || tapOpen_;
         const String tempo = typing ? entry_ : String(s.bpm);
         c.setFont(&fonts::Font7);
+        c.setTextSize(kNumScale);
         const int slotW = c.textWidth("000");
         const int numCx = kMargin + slotW / 2;
         c.setTextDatum(middle_center);
         c.setTextColor(provisional ? YELLOW : WHITE);
-        c.drawString(tempo, numCx, kRowY);
+        c.drawString(tempo, numCx, kNumCy);
         const int numberW = c.textWidth(tempo);
+        c.setTextSize(1);
 
         // Up/Down arrows (same cue as the tuner's reference A), same colour as the number
         ui::drawUpDown(c, numCx + numberW / 2 + 9, kArrowsTopY, provisional ? YELLOW : LIGHTGREY);
