@@ -924,49 +924,31 @@ metrónomo, éste lee el brillo ya restaurado. Con `L` off ninguna vista sube el
   `[battery] raw=<nivel> mv=<mV> charging=<0 no|1 sí|2 desconocido> hist=a,b,c cand=<segmentos> segs=<segmentos mostrados>`
   (con `Serial.begin(115200)` en `battery::begin()`, solo en esos entornos). El entorno normal no tiene log ni superposición.
 
-## 15. Guardia de continuidad de octava (2026-10-23)
+## 15. Guardia de continuidad de octava: probada y retirada (2026-10-24)
 
-### 15.1 Por qué
+**Registro histórico: la guardia YA NO existe en el firmware.** Se implementó el 2026-10-23 (`tonemap_detect::OctaveGuard`) y se
+retiró el 2026-10-24 tras probarla en el dispositivo.
 
-Aun con el K híbrido (§12), el detector da excursiones cortas de una octava: sobre grabaciones de viola reproducidas con el detector
-C++ en Python, F3/E3/D3 salen como F4/E4/D4 durante 1-6 fotogramas, y el re-pick con K = 0,97 produce algún fotograma A3 → A2 o
-D4 → D2. En ToneMap manchan de color las celdas de la octava vecina y en el afinador clásico hacen parpadear la nota y la aguja.
+### 15.1 Qué era
 
-### 15.2 Regla (`tonemap_detect::OctaveGuard`, solo cabecera)
+El K híbrido (§12) aún produce excursiones cortas de una octava con notas graves de viola (F3/E3/D3 leídas como F4/E4/D4 durante
+1-6 fotogramas; algún A3 → A2 por el re-pick con K = 0,97). La guardia comparaba cada fotograma con el anterior (en Hz brutos): si
+estaba a una octava exacta (±0,04 octava), lo devolvía plegado a la octava anterior y solo lo aceptaba si se repetía en 4
+fotogramas seguidos (~128 ms); un fotograma no válido la reiniciaba. Se aplicaba antes de `model.tick` (ToneMap) y de
+`freqToNote` (vista clásica).
 
-Se aplica a la frecuencia **bruta** (sin transponer) de cada ventana analizada, una vez por ventana y tras las puertas de validez.
-Estado por instancia: referencia `ref` (última frecuencia aceptada) y cuenta `count`.
+### 15.2 Números de la simulación
 
-- Ventana no válida (o Hz ≤ 0): `reset()` y se devuelve la entrada.
-- Primer fotograma válido tras un reinicio: `ref = hz`, `count = 0`, devuelve `hz`.
-- Si no, `l = log2(hz / ref)`. Si `|l − 1| < 0,04` o `|l + 1| < 0,04` (`kOctaveGuardTolOct`, 48 cents alrededor de la octava exacta):
-  `count++`; con `count ≥ 4` (`kOctaveGuardFrames`) se acepta (`ref = hz`, `count = 0`, devuelve `hz`); si no, devuelve la frecuencia
-  **plegada** (`hz / 2` si estaba por encima, `hz × 2` si por debajo) **sin tocar `ref`**, de modo que la nota sigue en la octava anterior.
-- Cualquier otra relación (glissando, vibrato, otra nota): `ref = hz`, `count = 0`, devuelve `hz`. Un fotograma que no es un salto de
-  octava también rompe la cuenta de saltos consecutivos.
-- Con N = 4 la simulación sobre la grabación larga reduce los saltos de octava de 33 a 16 y no retrasa nada más.
+Reproduciendo en Python el detector C++ sobre la grabación larga de viola, con N = 4 los saltos de octava bajaban de 33 a 16.
 
-### 15.3 Integración
+### 15.3 Por qué falló en el dispositivo
 
-- **ToneMap** (`tonemap_view.cpp`, instancia propia `octaveGuard`): `hz = octaveGuard.filter(an.hz, valid)` justo antes de `model.tick`.
-  Se reinicia donde se pierde la nota activa: `dropNote()` (pausa, salir de la vista, fin de ventanas a los 300 ms), `enter()`, cambio de
-  transposición (`K`, que termina la nota) y borrado del mapa (`R`). Así la guardia nunca sobrevive a la nota activa del modelo.
-- **Afinador clásico** (`mode_tuner.cpp`, instancia propia `octaveGuard_`): `hz = octaveGuard_.filter(an.hz, an.valid)` antes de
-  `tonemap::freqToNote`. Se reinicia al perder la lectura (fin de los 700 ms de retención) y en `resetReading()` (entrar, salir,
-  encender/apagar el drone, cambiar La). No cambian la retención de 700 ms ni el suavizado de 185 ms.
-- Un fotograma no válido reinicia la guardia aunque la vista clásica mantenga la lectura 700 ms; es coherente con el modelo de ToneMap,
-  donde un fotograma no válido termina la nota.
-
-### 15.4 Pruebas y riesgos
-
-- Banco (`[test] octave guard`, función pura, expectativas calculadas a mano): 175 Hz ×10 sin cambios; 350 ×2 y luego 175 → los dos
-  350 salen plegados a 175; 350 sostenido → fotogramas 1-3 plegados (175), el 4.º devuelve 350 y la guardia lo sigue; lo mismo hacia
-  abajo (350 estable, 175 ×3 → 350 plegado, el 4.º acepta 175); salto de +7 semitonos (175 → 262,2) aceptado al instante y que
-  limpia la cuenta; fotograma no válido reinicia (350 pasa a ser referencia de inmediato); un fotograma intermedio que no es octava
-  rompe la cuenta; borde de tolerancia (2,04 pliega, 2,06 no).
-- Riesgo: un salto de octava real (p. ej. el intérprete pasa de F3 a F4) tarda 3 fotogramas (~96-128 ms) en mostrarse. Con una nota
-  muy corta y aguda justo una octava por encima de la anterior, hasta 3 fotogramas pueden quedar plegados.
-- Sin comprobar en el dispositivo: el efecto real sobre la viola en vivo.
+Sergio notó más falsos positivos de octava superior que antes. Los fotogramas erróneos están sobre todo en el **ataque** de la nota
+(armónicos del arranque): si el PRIMER fotograma es F4, la guardia toma como referencia ese fotograma y pliega hacia arriba los
+F3 correctos de los 3-4 siguientes. Repetido sobre un F3 sostenido: antes la nota empezaba con 1 fotograma erróneo; con la guardia,
+con 4, y se repetía tras cada excursión corta. La guardia favorece la octava que se oye primero, que en los ataques es la
+equivocada. Se eliminó por completo (estructura, constantes, llamadas, reinicios y la serie `[test] octave guard` del banco); se
+volvió al uso directo de `an.hz` en ambas vistas.
 
 ## 16. Sordina: nivel de puerta Min y puerta automática en la vista clásica (2026-10-23)
 
@@ -1014,6 +996,6 @@ del usuario se vuelve a migrar en cada arranque, con el mismo resultado.
 
 ### 16.4 Riesgos
 
-Con la puerta a 20 el ruido ambiente entra más fácilmente al detector (lo frenan la claridad > 0,8 y la guardia de octava);
+Con la puerta a 20 el ruido ambiente entra más fácilmente al detector (lo frena la claridad > 0,8);
 un ruido continuo tonal (zumbido de red) hace subir el suelo y la puerta, lo que es el comportamiento buscado. Si el intérprete
 mantiene una nota larga muy fuerte justo al entrar, el suelo tarda en bajar hasta la siguiente pausa. Sin verificar en el dispositivo.

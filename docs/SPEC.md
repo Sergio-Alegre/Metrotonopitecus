@@ -102,12 +102,6 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
   detecta el instrumento con sordina (rms al tocar p5 ≈ 27); en una sala ruidosa sube hasta el 80 de antes y nunca más. Se
   actualiza con **todas** las ventanas (también las que quedan bajo la puerta) y se reinicia al entrar/salir y al encender/apagar
   el drone, no al perder cada lectura. La vista ToneMap mantiene su puerta manual (tabla abajo). Ver `TONEMAP_DESIGN.md` §16.
-- **Guardia de continuidad de octava** (en `tonemap_detect`, común a las dos vistas del afinador): un fotograma cuya
-  frecuencia queda a una octava exacta (±0,04 octava = 48 cents) por encima o por debajo del fotograma anterior se
-  devuelve plegado a la octava anterior, y solo se acepta como salto real si se repite en **4 fotogramas seguidos** (~128 ms).
-  Cualquier otra relación (glissando, vibrato, otra nota) se acepta al instante y rompe la cuenta; un fotograma no válido
-  reinicia la guardia. Corrige las excursiones breves de una octava del detector con notas graves (F3/E3/D3 leídas como
-  F4/E4/D4, A3 → A2). Un salto de octava real tarda 3 fotogramas más en reflejarse. Detalle y cifras: `TONEMAP_DESIGN.md` §15.
 - En el ADV micrófono y altavoz comparten reloj I2S: con el drone sonando no se escucha (la aguja y el dial se ponen
   grises y el centro dice `Mic off (drone playing)`).
 - **LED** (tecla `L`, mismo ajuste `tmLed` que la vista ToneMap, por defecto on): el LED RGB (GPIO 21) se pone **verde

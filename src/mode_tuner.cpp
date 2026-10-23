@@ -235,7 +235,6 @@ public:
         lastUpdateMs_ = now;
         if (hasReading_ && now - lastReadingMs_ > kHoldMs) {
             hasReading_ = false;
-            octaveGuard_.reset();
             dirty_ = true;
         }
         targetDeg_ = hasReading_ ? constrain(cents_, -kFullScale, kFullScale) : kRestDeg;
@@ -415,7 +414,6 @@ private:
     void resetReading() {
         hasReading_ = false;
         midi_ = -1;
-        octaveGuard_.reset();  // enter / leave / drone on-off / reference change: the guard never outlives the reading
     }
 
     void enterClassic() {
@@ -521,10 +519,8 @@ private:
         const tonemap_detect::Analysis an = tonemap_detect::analyse(autoGate_, wi.dtMs);
 
         // Nearest note over the whole range (written = concert pitch, no transposition).
-        // The octave guard folds short one-octave excursions back into the previous octave (an invalid window resets it).
-        const float hz = octaveGuard_.filter(an.hz, an.valid);
         tonemap::NoteHit hit = {-1, 0.0f, 0.0f, 0.0f};
-        if (an.valid) hit = tonemap::freqToNote(hz, refA);
+        if (an.valid) hit = tonemap::freqToNote(an.hz, refA);
         const bool accepted = hit.concertMidi >= tonemap::kGridLo && hit.concertMidi <= tonemap::kGridHi;
 
 #ifdef TUNER_DEBUG
@@ -572,7 +568,6 @@ private:
     bool listening_ = false;  // microphone on and capture running
     bool micFailed_ = false;  // the last startCapture() failed
     bool hasReading_ = false;
-    tonemap_detect::OctaveGuard octaveGuard_;
     tonemap_detect::AutoGate autoGate_;  // reset with the capture (enter / leave / drone on-off), not per lost reading
     int midi_ = -1;           // nearest note of the last reading
     float cents_ = 0;         // smoothed, relative to midi_

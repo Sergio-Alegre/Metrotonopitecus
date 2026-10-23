@@ -93,7 +93,6 @@ const char* const kPaletteNames[2] = {"Safe", "Extreme"};
 // The heat map: ~38 KB in .bss (Model has an empty constructor), never on the stack. It lives as
 // long as the firmware runs, so it survives mode and view switches.
 Model model;
-tonemap_detect::OctaveGuard octaveGuard;  // raw Hz continuity, per active note (never outlives it)
 
 // Map clock: millis() minus the time spent paused, so the fades freeze while paused.
 uint32_t clockOffset = 0;
@@ -288,7 +287,7 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
     const tonemap_detect::Analysis an = tonemap_detect::analyse(kGateRms[gateIdx()]);
     const bool loud = an.loud;
     const bool valid = an.valid;
-    const float hz = octaveGuard.filter(an.hz, valid);  // short one-octave excursions folded back
+    const float hz = an.hz;
 
     const TickResult t = model.tick(valid, hz, wi.dtMs, mapNow());
 
@@ -330,7 +329,6 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
 }
 
 void dropNote() {
-    octaveGuard.reset();
     model.endNote();
     hasNote = false;
     noteInZone = false;
@@ -616,7 +614,6 @@ void enter() {
 
     if (settings::get().tmLed != 0) tuner_led::brightnessRaise();
     paused = false;
-    octaveGuard.reset();
     syncModel(mapNow());
 
     hasNote = false;
@@ -713,7 +710,6 @@ void onKey(const KeyEvent& e) {
                     const int idx = (transpIndex(s.tmTransp) + 1) % 4;
                     s.tmTransp = kTransposeSemis[idx];
                     model.setTransposition(s.tmTransp, now);  // also ends the active note
-                    octaveGuard.reset();
                     hasNote = false;
                     noteInZone = false;
                     settings::touch();
@@ -744,7 +740,6 @@ void onKey(const KeyEvent& e) {
                     break;
                 case 'r':
                     model.reset(now);
-                    octaveGuard.reset();
                     hasNote = false;
                     noteInZone = false;
                     showMessage("%s", "Map cleared");

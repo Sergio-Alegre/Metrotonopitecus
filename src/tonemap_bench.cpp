@@ -5,7 +5,7 @@
 //   [bench]  header: build, CPU, heap, buffer sizes
 //   [synth]  detector accuracy on generated signals, 16 and 32 kHz, then a SUMMARY per rate
 //   [time]   microseconds per analysis (avg / max of 50 runs)
-//   [test]   ToneMap model tests (octave guard, parity vectors, colour, history, fade, re-basing, transposition,
+//   [test]   ToneMap model tests (parity vectors, colour, history, fade, re-basing, transposition,
 //            chunk equivalence, first-frame rule, robustness, budget): PASS / FAIL per series
 //   [live]   microphone mode, ~10 lines/s
 //   [clock]  measured I2S chunk rate every 10 s (real sample rate vs nominal)
@@ -31,7 +31,7 @@
 #include "pitch_mpm.h"
 #include "settings.h"
 #include "tonemap_audio.h"
-#include "tonemap_detect.h"  // OctaveGuard (header-only part)
+#include "tonemap_detect.h"  // gate table, AutoGate (header-only parts)
 #include "tonemap_model.h"
 #include "tonemap_vectors.h"  // generated into test/ by tools/gen_tonemap_vectors.py
 
@@ -1377,69 +1377,6 @@ void testBudget() {
     s.done("sizeof(NoteState)=%u sizeof(Model)=%u (budget 40960)", (unsigned)sizeof(NoteState), (unsigned)sizeof(Model));
 }
 
-// ---- octave-continuity guard (pure function, tonemap_detect.h) ---------------------------------------------
-// Expectations by hand from the rules: a frame about one octave from the reference (|log2 ratio -+ 1| < 0.04) is folded
-// back and only accepted as the 4th consecutive one; any other frame is accepted at once and resets the count; an invalid
-// frame resets the guard.
-void testOctaveGuard() {
-    Series s("octave guard");
-    tonemap_detect::OctaveGuard g;
-    int step = 0;
-    auto expect = [&](float hz, bool valid, float want) {
-        const float got = g.filter(hz, valid);
-        ++step;
-        s.check(fabsf(got - want) < 0.01f, "step %d: in %.1f valid=%d -> %.2f, expected %.2f", step, (double)hz,
-                (int)valid, (double)got, (double)want);
-    };
-    // 1. steady 175 x10 unchanged
-    for (int i = 0; i < 10; ++i) expect(175.0f, true, 175.0f);
-    // 2. 350 x2 then 175: the two octave frames fold to 175, the guard stays on 175
-    expect(350.0f, true, 175.0f);
-    expect(350.0f, true, 175.0f);
-    expect(175.0f, true, 175.0f);
-    // 3. 350 sustained: frames 1-3 folded, frame 4 accepted, the guard follows
-    expect(350.0f, true, 175.0f);
-    expect(350.0f, true, 175.0f);
-    expect(350.0f, true, 175.0f);
-    expect(350.0f, true, 350.0f);
-    expect(350.0f, true, 350.0f);  // now the reference: unchanged
-    expect(175.0f, true, 350.0f);  // and 175 is the excursion from there (folded up)
-    expect(350.0f, true, 350.0f);
-    // 4. downward: 350 steady, 175 x3 folded to 350, the 4th accepted
-    for (int i = 0; i < 4; ++i) expect(350.0f, true, 350.0f);
-    expect(175.0f, true, 350.0f);
-    expect(175.0f, true, 350.0f);
-    expect(175.0f, true, 350.0f);
-    expect(175.0f, true, 175.0f);
-    // 5. +7 semitones accepted immediately, and it resets the count
-    expect(175.0f, true, 175.0f);
-    expect(350.0f, true, 175.0f);   // count = 1
-    expect(262.2f, true, 262.2f);   // not an octave: accepted at once, the count is cleared
-    expect(524.4f, true, 262.2f);   // octave from the NEW reference counts from 1 (not 2)
-    expect(524.4f, true, 262.2f);
-    expect(524.4f, true, 262.2f);
-    expect(524.4f, true, 524.4f);   // 4th
-    // 6. an invalid frame resets: afterwards 175 (and later 350) is the new reference at once
-    expect(0.0f, false, 0.0f);
-    expect(175.0f, true, 175.0f);
-    expect(0.0f, false, 0.0f);
-    expect(350.0f, true, 350.0f);
-    // 7. a non-octave frame breaks the count
-    expect(175.0f, true, 350.0f);   // 1st octave-off frame (folded up)
-    expect(175.0f, true, 350.0f);   // 2nd
-    expect(190.0f, true, 190.0f);   // not an octave from 350 (log2 = -0.88): accepted, ref = 190
-    expect(380.0f, true, 190.0f);   // octave from 190: count restarts at 1 (folded)
-    expect(380.0f, true, 190.0f);   // 2
-    expect(380.0f, true, 190.0f);   // 3: would already have been accepted if the count had survived
-    expect(380.0f, true, 380.0f);   // 4
-    // 8. tolerance edge: 2 % above an octave (log2 = 1.029) is still the octave, 3 % (1.043 > 1.04) is another note
-    expect(100.0f, true, 100.0f);
-    expect(204.0f, true, 102.0f);   // octave within tolerance: folded
-    expect(206.0f, true, 206.0f);   // 2.06 from ref 100: accepted, ref = 206
-    expect(412.0f, true, 206.0f);   // 2.0 exactly from the new reference: folded
-    s.done("steady, 2-frame excursion, sustained jump (4th), downward, +7 st, invalid reset, broken count, tolerance");
-}
-
 // ---- noise-gate scale and migration (tonemap_detect.h, settings.cpp) -----------------------------------------
 void testGate() {
     Series s("noise gate");
@@ -1542,7 +1479,6 @@ void runModelTests() {
     gFailures = 0;
     gTicks = 0;
     testBudget();
-    testOctaveGuard();
     testGate();
     testAutoGate();
     testParity();
