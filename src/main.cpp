@@ -21,8 +21,8 @@ constexpr int kBarGap = 8;
 // 4x5 interior holds the five 1 px segments, filled from the bottom.
 constexpr int kBatW = 6;
 constexpr int kBatBodyH = 7;
-constexpr int kBatRightMargin = 1;   // free columns right of the icon
-constexpr int kBatGap = 3;           // between the Vol text and the icon
+constexpr int kBatRightMargin = 1;   // free columns right of the Vol text
+constexpr int kBatGap = 3;           // between the icon and the Vol text
 constexpr uint16_t kVolColor = WHITE;
 
 M5Canvas canvas(&M5Cardputer.Display);
@@ -81,17 +81,18 @@ void drawBar() {
         x += w + kBarGap;
     }
 
-    // Right end: volume text, then the battery icon pegged at the right edge. The mode labels keep their
-    // positions; the volume text moves left by the icon width. labelsEnd = first column free after the
-    // (highlighted) last label; "Vol 10" would overlap it, so it loses its space ("Vol10") only when needed.
+    // Right end: battery icon, then the volume text pegged at the right edge. The mode labels keep their
+    // positions; the icon sits left of the volume text (kBatGap away) and moves with its width. labelsEnd = first
+    // column free after the (highlighted) last label; "Vol 10" would overlap it, so it loses its space ("Vol10")
+    // only when needed.
     const int labelsEnd = x - kBarGap + 2;
-    const int batX = ui::kScreenW - kBatRightMargin - kBatW;
-    const int volRight = batX - kBatGap;
+    const int volRight = ui::kScreenW - kBatRightMargin;
     String vol = "Vol " + String(settings::get().volume);
-    if (volRight - (int)vol.length() * kCharW < labelsEnd + 3) vol = "Vol" + String(settings::get().volume);
+    if (volRight - (int)vol.length() * kCharW - kBatGap - kBatW < labelsEnd + 3) vol = "Vol" + String(settings::get().volume);
+    const int volLeft = volRight - (int)vol.length() * kCharW;
     d.setTextColor(kVolColor, BLACK);
-    d.drawString(vol, volRight - (int)vol.length() * kCharW, y + 2);
-    drawBattery(d, batX, y + 2);
+    d.drawString(vol, volLeft, y + 2);
+    drawBattery(d, volLeft - kBatGap - kBatW, y + 2);
 }
 
 void switchTo(Mode* next) {
