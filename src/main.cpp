@@ -17,10 +17,11 @@ constexpr int kBarGap = 8;
 
 // Battery icon (bottom-right of the bar): 12 x 7 body + 1 px nub = 13 px wide, 5 segments of 2 x 5 px inside the
 // 1 px outline. Rows y + 2 .. y + 8 are the rows of the Font0 capitals of the bar text.
-constexpr int kBatW = 13;
-constexpr int kBatBodyW = 12;
-constexpr int kBatH = 7;
-constexpr int kBatRightMargin = 1;   // free columns right of the nub
+// Vertical battery, 6 px wide and 8 px tall (the bar's text line is 8 px): a 2 px nub on top, then a 6x7 body whose
+// 4x5 interior holds the five 1 px segments, filled from the bottom.
+constexpr int kBatW = 6;
+constexpr int kBatBodyH = 7;
+constexpr int kBatRightMargin = 1;   // free columns right of the icon
 constexpr int kBatGap = 3;           // between the Vol text and the icon
 constexpr uint16_t kVolColor = WHITE;
 
@@ -51,9 +52,9 @@ void drawBattery(M5GFX& d, int x0, int y0) {
         col = YELLOW;
     }
     const uint16_t outline = battery::charging() ? (uint16_t)WHITE : col;
-    d.drawRect(x0, y0, kBatBodyW, kBatH, outline);
-    d.fillRect(x0 + kBatBodyW, y0 + 2, kBatW - kBatBodyW, 3, outline);
-    for (int i = 0; i < segs; ++i) d.fillRect(x0 + 1 + i * 2, y0 + 1, 2, kBatH - 2, col);
+    d.fillRect(x0 + 2, y0, 2, 1, outline);                       // nub
+    d.drawRect(x0, y0 + 1, kBatW, kBatBodyH, outline);           // body
+    for (int i = 0; i < segs; ++i) d.fillRect(x0 + 1, y0 + 6 - i, kBatW - 2, 1, col);  // segment 0 is the bottom one
 }
 
 void drawBar() {
