@@ -14,7 +14,8 @@ void begin();
 void setVolumeLevel(int level);
 
 // Short metronome click (square-ish tone). Ignored while the mic is active.
-void click(float hz, uint32_t ms);
+// gain (0..255) scales this click relative to the global volume (per-channel volume).
+void click(float hz, uint32_t ms, uint8_t gain = 255);
 
 // Continuous sine drone. Ignored while the mic is active.
 void droneStart(float hz);

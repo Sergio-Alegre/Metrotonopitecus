@@ -133,16 +133,25 @@ void drawSubdivision(M5Canvas& c, int sub, int cx, int base, uint16_t col) {
     }
 }
 
-// Same synth tone for the three clicks, falling in pitch with importance. The speaker is
-// weak at low pitches and short beeps sound faint (the subdivision got unclear from volume 5),
-// so the pitches are kept close together and high, and all three last 30 ms.
+// All clicks use the same pitch; importance is carried by loudness (per-click gain relative to the
+// global volume) and, slightly, by length: the bar accent is the loudest and longest, the other beats
+// are softer, and subdivisions are the quietest and shortest. The speaker is weak and very short beeps
+// sound faint, so subdivisions are kept at 18 ms and 55 % gain; tune the constants below by ear.
+constexpr float kClickHz = 1400.0f;
+constexpr uint8_t kGainAccent = 255;
+constexpr uint8_t kGainBeat = 191;  // 75 %
+constexpr uint8_t kGainSub = 140;   // 55 %
+constexpr uint32_t kMsAccent = 36;
+constexpr uint32_t kMsBeat = 30;
+constexpr uint32_t kMsSub = 18;
+
 void fireClick(int idx, int sub) {
     if (idx == 0) {
-        audio::click(1800.0f, 30);  // bar accent
+        audio::click(kClickHz, kMsAccent, kGainAccent);  // bar accent (first beat)
     } else if (idx % sub == 0) {
-        audio::click(1600.0f, 30);  // beat
+        audio::click(kClickHz, kMsBeat, kGainBeat);  // other beats
     } else {
-        audio::click(1200.0f, 30);  // subdivision
+        audio::click(kClickHz, kMsSub, kGainSub);  // subdivision
     }
 }
 
@@ -307,18 +316,20 @@ public:
         if (ledOn_ && (int32_t)(millis() - ledOffAt_) >= 0) ledOff();
     }
 
-    // Flash the RGB LED at the instant the new frame is on screen: red on the bar accent,
-    // green on the other beats, same colours as the circles. The flash lasts 1/5 of the beat,
-    // limited to 30..80 ms, so it is a constant 80 ms up to 150 BPM and shrinks for fast
-    // tempos (66 ms at 180, 54 at 220, 40 at 300).
+    // Flash the RGB LED at the instant the new frame is on screen: white on the bar accent,
+    // green on the other beats (white/green stays distinguishable for all three types of colour
+    // vision deficiency, unlike red/green), same colours as the circles. The flash lasts 1/5 of the beat, limited to 30..80 ms, so it is a constant
+    // 80 ms up to 150 BPM and shrinks for fast tempos (66 ms at 180, 54 at 220, 40 at 300).
+    // The accent flash is 1.5x longer, a cue that does not depend on colour at all.
     void afterPush() override {
         if (!flashPending_) return;
         flashPending_ = false;
 
         const int beatMs = 60000 / gBpm.load();
-        const int flashMs = constrain(beatMs / 5, kFlashMinMs, kFlashMaxMs);
+        int flashMs = constrain(beatMs / 5, kFlashMinMs, kFlashMaxMs);
         if (flashAccent_) {
-            showLed(255, 0, 0);
+            flashMs = flashMs * 3 / 2;
+            showLed(255, 255, 255);
         } else {
             showLed(0, 255, 0);
         }
@@ -369,7 +380,7 @@ public:
         for (int i = 0; i < beats; ++i) {
             // Left-justified: the first beat stays put, more beats extend to the right.
             const int x = kMargin + kBeatRadius + i * kBeatSpacing;
-            const uint16_t col = (i == 0) ? RED : GREEN;
+            const uint16_t col = (i == 0) ? WHITE : GREEN;  // accent white, other beats green (as the LED)
             if (i == beat) {
                 c.fillCircle(x, kBottomY, kBeatRadius, col);
             } else {

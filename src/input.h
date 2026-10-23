@@ -6,7 +6,7 @@
 #pragma once
 #include <Arduino.h>
 
-enum class Key : uint8_t { Char, Up, Down, Left, Right, Enter, Del, Space };
+enum class Key : uint8_t { Char, Up, Down, Left, Right, Enter, Del, Space, Alt };  // Alt: one event per press, no repeat
 
 struct KeyEvent {
     Key key;
