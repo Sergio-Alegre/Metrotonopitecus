@@ -19,8 +19,10 @@ instala a través de Launcher: WebUI (opción WUI de Launcher, subida desde el n
 **Flasheo por USB, solo con permiso de Sergio.** Claude flashea por USB únicamente cuando Sergio lo pide:
 - Una orden puntual ("flashea", "súbelo", "dame firmware nuevo" con el Cardputer conectado por USB) vale
   para ese firmware. Si pide firmware nuevo y el dispositivo está conectado, se entiende que se flashea.
-- Si Sergio dice "en esta sesión flashea siempre" (o equivalente), se flashea tras cada compilación
-  correcta hasta que termine la sesión o diga lo contrario. No se arrastra a otras sesiones.
+- **Permiso permanente (Sergio, 2026-10-24):** si el Cardputer está conectado por USB (`pio device list` muestra
+  el puerto), se flashea tras cada compilación correcta sin preguntar, usando el entorno normal `cardputer-adv`
+  (no las variantes de diagnóstico salvo que se pidan). Si Sergio no quiere que se flashee algo, desconecta el
+  dispositivo. Sin puerto visible, no se intenta nada.
 - Sin puerto serie visible (`pio device list` vacío) no se intenta nada: se deja `firmware.bin` listo para
   subirlo por WebUI y se avisa.
 - Flashear por USB sustituye a Launcher en ese slot; Sergio lo sabe y lo asume. Recuperar Launcher es cosa suya.
