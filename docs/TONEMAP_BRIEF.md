@@ -346,7 +346,7 @@ Números de línea de `index.html` entre paréntesis.
   τmax para ~62 Hz. Estimación: 10–20 ms por análisis; **medirlo**.
 - Si no cabe en tiempo, opciones por orden: (a) bajar `WINDOW` a 1536, (b) diezmar a 16 kHz para τ grandes,
   (c) autocorrelación por FFT con `esp-dsp`. La (c) es **una dependencia nueva: preguntar a Sergio antes**.
-- No tocar `pitch.cpp`: el afinador clásico sigue con su detector.
+- No tocar `pitch.cpp`: el afinador clásico sigue con su detector. (Nota 2026-10-24: el clásico acabó usando el detector de ToneMap y `pitch.cpp/.h` se borró.)
 
 ### 4.3 Umbrales de micro
 

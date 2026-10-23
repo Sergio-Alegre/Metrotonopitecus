@@ -783,7 +783,7 @@ elegir solo la nota del **drone** (se rotula `Drone <Hz>`).
   `mpm::prepare` + puerta rms + `mpm::findPitch` con K híbrido y maxLag 720 + claridad > 0,8 + 14 < Hz < 8200) ->
   `tonemap::freqToNote(hz, refA)` (transposición 0). Puerta automática desde 2026-10-23 (§16; antes fija rms >= 80, la "Low"). Una nota fuera de C2..B7
   (36..107) se descarta. `tonemap_detect.cpp` guarda los tres búferes de análisis (~15 KB) que antes eran de `tonemap_view.cpp`;
-  la vista ToneMap llama a la misma función sin cambiar su comportamiento. `pitch.cpp/.h` (detector antiguo) ya no se usa.
+  la vista ToneMap llama a la misma función sin cambiar su comportamiento. `pitch.cpp/.h` (detector antiguo, ±2 semitonos) ya no se usaba y se borró (2026-10-24).
 - **Aguja y suavizado.** Una lectura por ventana (~31/s). Dentro de la misma nota, suavizado exponencial con tau = 185 ms
   (equivale al 0,5 por fotograma de 128 ms del detector anterior); si la nota cambia o el salto supera 25 cents, se toma al
   instante. La lectura se mantiene 700 ms sin ventanas válidas y entonces la aguja vuelve al reposo (igual que antes). La aguja
