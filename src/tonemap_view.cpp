@@ -655,6 +655,9 @@ void enter() {
     if (active) leave();
     active = true;
     menuOpen = false;
+#ifdef TONEMAP_DEBUG
+    Serial.begin(115200);  // the app never opens the USB CDC port by itself: without this no [tm] line reaches the PC
+#endif
     Serial.println("[tonemap] enter");
 
     // The mic is ended on every entry path; be safe if it is not (attach() needs it stopped).

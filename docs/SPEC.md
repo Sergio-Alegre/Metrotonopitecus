@@ -275,8 +275,9 @@ Ver brief §6. Estado (2026-10-23):
 - [x] Paridad de notas con el fixture de ToneMap: 264/264 filas `PASS` (más 192 filas extra propias).
 - [~] Sintético: sin errores de octava de C2 a B7 a 32 kHz. Error ≤ 1 c de C2 a C6 con senoidal; con diente de sierra C6 +20 c da +1,39 c.
       Octava 7: senoidal ≤ 1,65 c; diente de sierra hasta +8,7 c → **"best effort" documentado** (TONEMAP_DESIGN §12).
-- [~] Análisis completo en < 20 ms (9,25 ms medido). ≥ 25 análisis/s con la pantalla dibujando: 31/s con carga de dibujo simulada;
-      falta la medición con análisis y dibujo reales (entorno `cardputer-adv-tonemap-debug`).
+- [x] Análisis completo en < 20 ms (9,25 ms medido). ≥ 25 análisis/s con la pantalla dibujando: **31,2/s de media** (mín. 29,8)
+      con análisis y dibujo reales durante 75 s tocando viola (entorno `cardputer-adv-tonemap-debug`, puerta de ruido en None);
+      9,6 ms/análisis, 3,3 ms de dibujo, 12,1 ms de envío, ~15,6 fps, `starved=0`, `torn=0`, heap mínimo 216 KB.
 - [x] Pruebas de color, historia, desvanecido, re-basado, transposición y color en vivo: `PASS` (14 series en el dispositivo).
 
 **B. En el dispositivo (Sergio)**: pendiente de la PARADA C (lista en brief §6 B, más: menú Alt/Enter, paletas `P`, color en vivo de cents y LED,

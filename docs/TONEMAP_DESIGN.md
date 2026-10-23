@@ -861,3 +861,12 @@ dejan de ser "verde / blanco" y pasan a mostrar el color de la desviación **ins
   (el umbral de 16 niveles y los 50 ms lo limitan); el centro de Safe `(200,255,200)` es casi blanco en el LED.
 - Tests: `liveColor` (ambas paletas, zona muerta, extremos, infinitos, NaN, paleta desconocida, coincidencia con `cellColor` a display 1
   en Safe) en el banco y en el port Python.
+
+### PARADA C: medición con análisis y dibujo reales (2026-10-23)
+
+- Entorno `cardputer-adv-tonemap-debug`, viola, vista ToneMap, 147 líneas `[tm]` (~75 s), puerta de ruido en `None` (análisis siempre activo, peor caso):
+  `an/s` 31,2 de media (mín. 29,8; máx. 32,0), `an_ms` 9,6 (máx. 9,7), `draw_ms` 3,3, `push_ms` ~12,1, `fps` 15,6, `loop_ms` ~9, `starved=0`, `torn=0`,
+  `skipped=3` constante (arranque), `minheap=216504`. Criterio de brief §6 A (≥ 25 análisis/s con la pantalla dibujando) cumplido.
+- Hallazgo: la app no abre el puerto USB CDC por sí sola; `Serial.println` no llega al PC sin `Serial.begin(115200)`. Se añadió solo en el build
+  `TONEMAP_DEBUG` (`tonemap::enter()`); la app normal sigue sin llamarlo (los logs `[mode]`, `[settings]`, `[tonemap]` solo salen con ese build o con un monitor
+  que ya haya abierto el puerto).
