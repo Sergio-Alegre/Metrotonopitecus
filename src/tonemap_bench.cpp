@@ -25,9 +25,11 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "audio.h"
 #include "pitch_mpm.h"
+#include "settings.h"
 #include "tonemap_audio.h"
 #include "tonemap_detect.h"  // OctaveGuard (header-only part)
 #include "tonemap_model.h"
@@ -1438,12 +1440,111 @@ void testOctaveGuard() {
     s.done("steady, 2-frame excursion, sustained jump (4th), downward, +7 st, invalid reset, broken count, tolerance");
 }
 
+// ---- noise-gate scale and migration (tonemap_detect.h, settings.cpp) -----------------------------------------
+void testGate() {
+    Series s("noise gate");
+    namespace td = tonemap_detect;
+    s.check(td::kGateLevels == 5, "levels = %d", td::kGateLevels);
+    const float want[5] = {0.0f, 30.0f, 80.0f, 200.0f, 450.0f};
+    for (int i = 0; i < 5; ++i) s.check(td::kGateRms[i] == want[i], "kGateRms[%d] = %.0f", i, (double)td::kGateRms[i]);
+    s.check(td::kGateDefault == 2 && td::kGateRms[td::kGateDefault] == 80.0f, "default is Low (80)");
+    s.check(strcmp(td::kGateNames[0], "None") == 0 && strcmp(td::kGateNames[1], "Min") == 0 && strcmp(td::kGateNames[2], "Low") == 0 &&
+                strcmp(td::kGateNames[3], "Med") == 0 && strcmp(td::kGateNames[4], "High") == 0,
+            "names None, Min, Low, Med, High");
+    // cycle order with key N: None -> Min -> Low -> Med -> High -> None
+    int idx = 0;
+    const int order[6] = {1, 2, 3, 4, 0, 1};
+    for (int i = 0; i < 6; ++i) {
+        idx = (td::gateIndex(idx) + 1) % td::kGateLevels;
+        s.check(idx == order[i], "cycle step %d -> %d", i, idx);
+    }
+    s.check(td::gateIndex(-3) == 0 && td::gateIndex(9) == 4 && td::gateIndex(2) == 2, "gateIndex clamps");
+    // migration of the old scale (0 none, 1 low, 2 med, 3 high) -> (0, 2, 3, 4); anything else = Low
+    s.check(settings::migrateGate(0) == 0, "old 0 (none) -> 0");
+    s.check(settings::migrateGate(1) == 2, "old 1 (low) -> 2");
+    s.check(settings::migrateGate(2) == 3, "old 2 (med) -> 3");
+    s.check(settings::migrateGate(3) == 4, "old 3 (high) -> 4");
+    s.check(settings::migrateGate(-1) == 2 && settings::migrateGate(4) == 2 && settings::migrateGate(99) == 2,
+            "out-of-range old value -> Low");
+    s.done("5-level table 0/30/80/200/450, cycle order, default Low, migration {0,1,2,3} -> {0,2,3,4}");
+}
+
+// ---- automatic gate of the classic tuner (tonemap_detect.h, pure struct) ----------------------------------
+// Expectations by hand: floor = min-following with instant fall (never below 1), upward drift
+// floor += (rms - floor) * min(1, dt / 30000), gate = clamp(2.5 * floor, 20, 80).
+void testAutoGate() {
+    Series s("auto gate");
+    namespace td = tonemap_detect;
+    auto approx = [](float a, float b, float tol) { return fabsf(a - b) <= tol; };
+    td::AutoGate g;
+    // not initialised yet: the highest gate
+    s.check(approx(g.update(-1.0f, 32), 80.0f, 0.001f), "uninitialised + invalid rms -> 80");
+    // init from the first window: silent room, floor 6 -> 2.5 x 6 = 15 -> clamped up to 20
+    g.reset();
+    s.check(approx(g.update(6.0f, 32), 20.0f, 0.001f) && approx(g.floor(), 6.0f, 0.001f), "init floor 6 -> gate 20, floor %.2f",
+            (double)g.floor());
+    // in between: floor 16 -> 40
+    g.reset();
+    s.check(approx(g.update(16.0f, 32), 40.0f, 0.001f) && approx(g.floor(), 16.0f, 0.001f), "floor 16 -> gate 40");
+    // clamp edges: floor 8 -> 20 exactly, floor 32 -> 80 exactly
+    g.reset();
+    s.check(approx(g.update(8.0f, 32), 20.0f, 0.001f), "floor 8 -> 20");
+    g.reset();
+    s.check(approx(g.update(32.0f, 32), 80.0f, 0.001f), "floor 32 -> 80");
+    // clamp high: floor 100 -> 250 -> 80
+    g.reset();
+    s.check(approx(g.update(100.0f, 32), 80.0f, 0.001f) && approx(g.floor(), 100.0f, 0.001f), "floor 100 -> gate 80");
+    // fast fall: a quieter window lowers the floor at once (100 -> 10 -> gate 25)
+    s.check(approx(g.update(10.0f, 32), 25.0f, 0.001f) && approx(g.floor(), 10.0f, 0.001f), "fall 100 -> 10: gate 25");
+    // slow rise from floor 10 with rms 100 and dt 32 ms: floor_n = 100 - 90 * (1 - 32/30000)^n
+    const float k = 32.0f / 30000.0f;
+    g.update(100.0f, 32);
+    s.check(approx(g.floor(), 10.0f + 90.0f * k, 0.001f), "first rise step: floor %.4f", (double)g.floor());
+    int n = 1;
+    for (; n < 937; ++n) g.update(100.0f, 32);  // 937 windows = 29.98 s
+    const double want937 = 100.0 - 90.0 * pow(1.0 - (double)k, 937.0);
+    s.check(fabs((double)g.floor() - want937) < 0.05, "after 937 windows floor %.3f, expected %.3f (~66.9)", (double)g.floor(),
+            want937);
+    s.check(approx(g.update(100.0f, 32), 80.0f, 0.001f), "risen floor 67 -> gate clamped to 80");
+    // never below 1: rms 0 -> floor 1 -> gate 20; the floor itself stays 1
+    g.reset();
+    g.update(50.0f, 32);
+    s.check(approx(g.update(0.0f, 32), 20.0f, 0.001f) && approx(g.floor(), 1.0f, 0.001f), "rms 0 -> floor 1");
+    g.reset();
+    g.update(0.0f, 32);
+    s.check(approx(g.floor(), 1.0f, 0.001f), "init with rms 0 -> floor 1");
+    // dt = 0 is taken as 32 ms
+    td::AutoGate a, b;
+    a.update(10.0f, 32);
+    b.update(10.0f, 32);
+    a.update(100.0f, 0);
+    b.update(100.0f, 32);
+    s.check(approx(a.floor(), b.floor(), 1e-6f) && a.floor() > 10.0f, "dt = 0 behaves as 32 ms (floor %.4f)", (double)a.floor());
+    // a huge dt moves the floor all the way (k capped at 1)
+    a.update(100.0f, 100000);
+    s.check(approx(a.floor(), 100.0f, 0.001f), "dt >= 30 s: floor jumps to rms");
+    // NaN / negative rms: the floor is left alone
+    a.reset();
+    a.update(30.0f, 32);
+    const float f0 = a.floor();
+    const float gn = a.update(NAN, 32);
+    const float gm = a.update(-5.0f, 32);
+    s.check(approx(a.floor(), f0, 0.0f) && approx(gn, 75.0f, 0.001f) && approx(gm, 75.0f, 0.001f), "NaN / negative rms ignored (gate %.1f)",
+            (double)gn);
+    // infinite rms is capped, the gate stays finite and at most 80
+    const float gi = a.update(INFINITY, 32);
+    s.check(isfinite(gi) && gi <= 80.0f && gi >= 20.0f, "inf rms -> finite gate %.1f", (double)gi);
+    s.done("init, clamp 20/80, 2.5x, fast fall, slow rise (30 s), min floor 1, dt=0, NaN/negative/inf");
+}
+
 void runModelTests() {
     const uint32_t t0 = millis();
     gFailures = 0;
     gTicks = 0;
     testBudget();
     testOctaveGuard();
+    testGate();
+    testAutoGate();
     testParity();
     testColor();
     testPalette();

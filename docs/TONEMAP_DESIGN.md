@@ -388,7 +388,7 @@ int tunerView = 0;     // 0 classic, 1 tonemap
 int tmSens   = 1;      // 0 relaxed 1 medium 2 hard
 int tmHist   = 1;      // 0 1s 1 3s 2 30s 3 unlimited
 int tmHold   = 2;      // 0 5s 1 15s 2 30s 3 2min 4 5min 5 no-fade
-int tmGate   = 1;      // 0 none 1 low 2 med 3 high
+int tmGate   = 2;      // escala nueva (§16): 0 none 1 min 2 low 3 med 4 high; clave NVS tmGateB (la antigua tmGate: 0 none 1 low 2 med 3 high)
 int tmTransp = 0;      // semitones: 0, -2, 3, 5
 int tmFlats  = 0;
 int tmLed    = 1;
@@ -476,7 +476,7 @@ Cada cambio llama a `settings::touch()`. Mensajes de 1,5 s (`Sensitivity: Hard`,
 `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`, `LED: off`, `Map cleared`). En pausa
 la franja muestra `Paused (Space)` fijo.
 
-**Tabla de puerta (calibrada en la PARADA A, ver §12):** `kGateRms = {0, 80, 200, 450}`, `kMinClarity = 0.8`. (Valor inicial del diseño: `{0, 120, 300, 800}`.)
+**Tabla de puerta (calibrada en la PARADA A, ver §12; desde 2026-10-23 con un nivel `Min` más, ver §16):** `kGateRms = {0, 30, 80, 200, 450}` (None, Min, Low, Med, High), `kMinClarity = 0.8`. Antes: `{0, 80, 200, 450}`. (Valor inicial del diseño: `{0, 120, 300, 800}`.)
 La comprobación de energía es `sumSq > 0` (equivale a `rms>1e-7 || peak>4e-6` de ToneMap en unidades int16).
 
 ## 8. TONEMAP_BENCH y TONEMAP_DEBUG
@@ -781,7 +781,7 @@ elegir solo la nota del **drone** (se rotula `Drone <Hz>`).
 
 - **Motor.** `tonemap_audio` (captura continua a 32 kHz) -> `tonemap_detect::analyse` (el mismo código que la vista ToneMap:
   `mpm::prepare` + puerta rms + `mpm::findPitch` con K híbrido y maxLag 720 + claridad > 0,8 + 14 < Hz < 8200) ->
-  `tonemap::freqToNote(hz, refA)` (transposición 0). Puerta fija rms >= 80 (la "Low", `kGateRms[1]`). Una nota fuera de C2..B7
+  `tonemap::freqToNote(hz, refA)` (transposición 0). Puerta automática desde 2026-10-23 (§16; antes fija rms >= 80, la "Low"). Una nota fuera de C2..B7
   (36..107) se descarta. `tonemap_detect.cpp` guarda los tres búferes de análisis (~15 KB) que antes eran de `tonemap_view.cpp`;
   la vista ToneMap llama a la misma función sin cambiar su comportamiento. `pitch.cpp/.h` (detector antiguo) ya no se usa.
 - **Aguja y suavizado.** Una lectura por ventana (~31/s). Dentro de la misma nota, suavizado exponencial con tau = 185 ms
@@ -967,3 +967,53 @@ Estado por instancia: referencia `ref` (última frecuencia aceptada) y cuenta `c
 - Riesgo: un salto de octava real (p. ej. el intérprete pasa de F3 a F4) tarda 3 fotogramas (~96-128 ms) en mostrarse. Con una nota
   muy corta y aguda justo una octava por encima de la anterior, hasta 3 fotogramas pueden quedar plegados.
 - Sin comprobar en el dispositivo: el efecto real sobre la viola en vivo.
+
+## 16. Sordina: nivel de puerta Min y puerta automática en la vista clásica (2026-10-23)
+
+### 16.1 Medidas
+
+Grabación tocando la viola con **sordina de estudio** (micro a 50-60 cm): silencio rms 5-6; tocando, rms mediana 75, p25 48, p5 27.
+La puerta 80 ("Low") pierde el 55 % de los fotogramas detectables; con puerta 30 se conserva el 93 % y no hay fantasmas (el silencio
+lo rechaza igualmente la claridad > 0,8).
+
+### 16.2 Vista ToneMap: puerta manual de 5 niveles
+
+`kGateRms = {0, 30, 80, 200, 450}` con nombres `None`, `Min`, `Low`, `Med`, `High` (`tonemap_detect.h`, junto con `kGateNames`,
+`kGateLevels = 5` y `kGateDefault = 2`). `Low` (80) conserva su significado y sigue siendo el valor por defecto. La tecla `N` rota
+None → Min → Low → Med → High → None (mensaje `Noise gate: Min`), y el panel de opciones, la marca del medidor de nivel y el
+log `gate=` usan la misma tabla. `tmGate` pasa a tener rango 0..4 (`clampAll`).
+
+**Migración (NVS).** Las claves de NVS no pueden cambiar de significado en silencio: `tmGate` guarda la escala antigua
+(0 none, 1 low, 2 med, 3 high). La escala nueva usa la clave `tmGateB` (7 caracteres, ≤ 15). `settings::load()`:
+
+1. si existe `tmGateB`, se lee y se usa;
+2. si no existe pero sí `tmGate`, `tmGate = migrateGate(valorAntiguo)` con {0,1,2,3} → {0,2,3,4} (cualquier otro valor → 2) y se
+   escribe una línea por serie `noise gate migrated to the new scale`;
+3. si no existe ninguna, queda el valor por defecto (2, Low).
+
+`settings::tick()` solo escribe `tmGateB`; la clave antigua se deja sin tocar y se ignora cuando `tmGateB` existe. Sin cambios
+del usuario se vuelve a migrar en cada arranque, con el mismo resultado.
+
+### 16.3 Vista clásica: puerta automática (sin tecla ni ajuste)
+
+`tonemap_detect::AutoGate` (estructura pura, probada en el banco):
+
+- `floor` (suelo de ruido, unidades rms) se inicia con la primera ventana tras `reset()` (`max(rms, 1)`).
+- Cada ventana: si `rms < floor`, `floor = max(rms, 1)` al instante; si no, `floor += (rms − floor) × min(1, dtMs / 30000)`
+  (deriva ascendente lenta, constante de tiempo 30 s; `dtMs = 0` se toma como 32).
+- Puerta = `clamp(2,5 × floor, 20, 80)`. Sala en silencio (suelo ~6) → 20; suelo 16 → 40; suelo ≥ 32 → 80. Nunca por encima del 80 de
+  antes, así que el comportamiento en una sala ruidosa no empeora.
+- Una rms NaN o negativa no aporta información: no mueve el suelo. La rms se limita a 32768.
+- `tonemap_detect::analyse(AutoGate&, dtMs)`: `mpm::prepare` corre en **todas** las ventanas, el suelo se actualiza con su rms (también
+  si queda bajo la puerta, para que pueda bajar en silencio) y solo entonces se compara con el umbral devuelto; `findPitch` solo corre
+  por encima. `Analysis::gate` lleva el umbral usado (el log `[tuner]` lo muestra). La vista ToneMap sigue llamando a
+  `analyse(float gateRms)` sin cambios.
+- Reinicio: junto con la captura (`startCapture`/`stopCapture`: entrar, salir, drone on/off), no en cada lectura perdida. Si se
+  entra tocando, el suelo arranca alto (hasta 80) y baja en cuanto hay una ventana más silenciosa.
+- La vista clásica ya no usa `tmGate` (ni tiene tecla `N`).
+
+### 16.4 Riesgos
+
+Con la puerta a 20 el ruido ambiente entra más fácilmente al detector (lo frenan la claridad > 0,8 y la guardia de octava);
+un ruido continuo tonal (zumbido de red) hace subir el suelo y la puerta, lo que es el comportamiento buscado. Si el intérprete
+mantiene una nota larga muy fuerte justo al entrar, el suelo tarda en bajar hasta la siguiente pausa. Sin verificar en el dispositivo.

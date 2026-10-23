@@ -15,7 +15,7 @@ struct Settings {
     int tmSens = 1;          // 0 relaxed, 1 medium, 2 hard
     int tmHist = 1;          // 0 1 s, 1 3 s, 2 30 s, 3 unlimited
     int tmHold = 2;          // 0 5 s, 1 15 s, 2 30 s, 3 2 min, 4 5 min, 5 no fade
-    int tmGate = 1;          // noise gate: 0 none, 1 low, 2 med, 3 high
+    int tmGate = 2;          // noise gate of the ToneMap view (the classic view is automatic): 0 none, 1 min, 2 low, 3 med, 4 high (NVS key tmGateB)
     int tmTransp = 0;        // transposition in semitones: 0 (C), -2 (Bb), 3 (Eb), 5 (F)
     int tmFlats = 0;         // 0 sharps, 1 flats
     int tmLed = 1;           // in-tune LED on/off
@@ -34,6 +34,10 @@ constexpr float kMinRefA = 400.0f;
 constexpr float kMaxRefA = 480.0f;
 
 Settings& get();
+
+// Old noise-gate scale (NVS key "tmGate": 0 none, 1 low, 2 med, 3 high) -> current scale (0 none, 1 min, 2 low, 3 med,
+// 4 high): {0,1,2,3} -> {0,2,3,4}. Anything else gives the default (Low, 2).
+int migrateGate(int oldValue);
 
 void load();
 

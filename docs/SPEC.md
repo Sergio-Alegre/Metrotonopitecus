@@ -91,10 +91,17 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
   detección. Debajo del selector pone `Drone <Hz>`.
 - Espacio o `P`: drone (onda senoidal) a la frecuencia de la nota elegida.
 - Motor: el de la vista ToneMap (captura continua a 32 kHz de `tonemap_audio`, ventana de 2048 muestras, `pitch_mpm`
-  con K híbrido y maxLag 720, puerta de ruido rms ≥ 80 —la "Low" de ToneMap—, claridad > 0,8, 14 < Hz < 8200; código
+  con K híbrido y maxLag 720, **puerta de ruido automática** (rms ≥ 2,5 × el suelo de ruido de la sala, entre 20 y 80; ver
+  abajo), claridad > 0,8, 14 < Hz < 8200; código
   común en `tonemap_detect.*`). Una lectura nueva por ventana (~31/s); suavizado exponencial de ~185 ms mientras la
   nota no cambia (un cambio de nota o un salto de más de 25 cents se toma al instante) y la lectura se mantiene 0,7 s
   sin ventanas válidas antes de devolver la aguja al reposo.
+- **Puerta de ruido automática (vista clásica)**: sin tecla ni ajuste. El suelo de ruido es la mínima rms vista (baja al
+  instante hacia una ventana más silenciosa, nunca por debajo de 1) y sube despacio (constante de tiempo de 30 s) hacia ventanas
+  más fuertes; la puerta es `2,5 × suelo`, limitada a **20..80**. En una sala en silencio (suelo ~6) la puerta es 20, así que se
+  detecta el instrumento con sordina (rms al tocar p5 ≈ 27); en una sala ruidosa sube hasta el 80 de antes y nunca más. Se
+  actualiza con **todas** las ventanas (también las que quedan bajo la puerta) y se reinicia al entrar/salir y al encender/apagar
+  el drone, no al perder cada lectura. La vista ToneMap mantiene su puerta manual (tabla abajo). Ver `TONEMAP_DESIGN.md` §16.
 - **Guardia de continuidad de octava** (en `tonemap_detect`, común a las dos vistas del afinador): un fotograma cuya
   frecuencia queda a una octava exacta (±0,04 octava = 48 cents) por encima o por debajo del fotograma anterior se
   devuelve plegado a la octava anterior, y solo se acepta como salto real si se repite en **4 fotogramas seguidos** (~128 ms).
@@ -212,7 +219,7 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 | `S` | Sensibilidad: Relaxed → Medium → Hard → … |
 | `H` | History: 1 s → 3 s → 30 s → Unlimited → … |
 | `C` | Color hold: 5 s → 15 s → 30 s → 2 min → 5 min → No fade → … |
-| `N` | Puerta de ruido: None → Low → Med → High → … |
+| `N` | Puerta de ruido: None → Min → Low → Med → High → … (solo vista ToneMap) |
 | `K` | Transposición: C → Bb → Eb → F → … |
 | `F` | Sostenidos ↔ bemoles en etiquetas y franja |
 | `L` | LED de afinado on/off |
@@ -246,7 +253,13 @@ Todos se guardan en NVS con el mecanismo diferido que ya existe (`settings::touc
 | Sensibilidad | relaxed / medium / hard | medium | `tmSens` |
 | History | 1 s / 3 s / 30 s / unlimited | 3 s | `tmHist` |
 | Color hold | 5 s / 15 s / 30 s / 120 s / 300 s / no fade | 30 s | `tmHold` |
-| Puerta de ruido | none / low / med / high | low | `tmGate` |
+| Puerta de ruido (solo ToneMap) | none (0) / min (30) / low (80) / med (200) / high (450), rms int16 | low | `tmGate` (clave NVS `tmGateB`) |
+
+**Migración de la puerta:** hasta ahora la clave NVS `tmGate` guardaba la escala antigua de 4 niveles (0 none, 1 low, 2 med,
+3 high). La escala actual de 5 niveles se guarda en `tmGateB`. Al cargar, si `tmGateB` no existe y sí `tmGate`, se convierte
+{0, 1, 2, 3} → {0, 2, 3, 4} (`settings::migrateGate`; un valor fuera de rango da Low); después solo se usa `tmGateB`. Sin ninguna
+de las dos claves, el valor por defecto es Low (2). Los mensajes son `Noise gate: None` / `Min` / `Low` / `Med` / `High`.
+El nivel `Min` (30) está pensado para tocar con sordina (ver `TONEMAP_DESIGN.md` §16).
 | Transposición | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
 | Alteraciones | sharps / flats | sharps | `tmFlats` |
 | LED de afinado | on / off | on | `tmLed` |

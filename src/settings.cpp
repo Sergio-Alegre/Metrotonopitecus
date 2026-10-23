@@ -22,7 +22,7 @@ void clampAll(Settings& s) {
     s.tmSens = constrain(s.tmSens, 0, 2);
     s.tmHist = constrain(s.tmHist, 0, 3);
     s.tmHold = constrain(s.tmHold, 0, 5);
-    s.tmGate = constrain(s.tmGate, 0, 3);
+    s.tmGate = constrain(s.tmGate, 0, 4);
     if (s.tmTransp != 0 && s.tmTransp != -2 && s.tmTransp != 3 && s.tmTransp != 5) s.tmTransp = 0;
     s.tmFlats = constrain(s.tmFlats, 0, 1);
     s.tmLed = constrain(s.tmLed, 0, 1);
@@ -34,6 +34,16 @@ void clampAll(Settings& s) {
 namespace settings {
 
 Settings& get() { return current; }
+
+int migrateGate(int oldValue) {
+    switch (oldValue) {
+        case 0: return 0;  // none
+        case 1: return 2;  // low
+        case 2: return 3;  // med
+        case 3: return 4;  // high
+        default: return 2;
+    }
+}
 
 void load() {
     if (!prefs.begin("metro", true)) {
@@ -50,7 +60,14 @@ void load() {
     current.tmSens = prefs.getInt("tmSens", current.tmSens);
     current.tmHist = prefs.getInt("tmHist", current.tmHist);
     current.tmHold = prefs.getInt("tmHold", current.tmHold);
-    current.tmGate = prefs.getInt("tmGate", current.tmGate);
+    // The gate has 5 levels since the practice-mute change; the key "tmGate" holds the OLD 4-level scale, so the new
+    // scale lives in "tmGateB". If it is absent, an old value is migrated (and the next save writes only the new key).
+    if (prefs.isKey("tmGateB")) {
+        current.tmGate = prefs.getInt("tmGateB", current.tmGate);
+    } else if (prefs.isKey("tmGate")) {
+        current.tmGate = migrateGate(prefs.getInt("tmGate", 1));
+        Serial.printf("[settings] noise gate migrated to the new scale: %d\n", current.tmGate);
+    }
     current.tmTransp = prefs.getInt("tmTransp", current.tmTransp);
     current.tmFlats = prefs.getInt("tmFlats", current.tmFlats);
     current.tmLed = prefs.getInt("tmLed", current.tmLed);
@@ -87,7 +104,7 @@ void tick() {
     prefs.putInt("tmSens", current.tmSens);
     prefs.putInt("tmHist", current.tmHist);
     prefs.putInt("tmHold", current.tmHold);
-    prefs.putInt("tmGate", current.tmGate);
+    prefs.putInt("tmGateB", current.tmGate);
     prefs.putInt("tmTransp", current.tmTransp);
     prefs.putInt("tmFlats", current.tmFlats);
     prefs.putInt("tmLed", current.tmLed);

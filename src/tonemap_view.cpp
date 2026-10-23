@@ -32,6 +32,7 @@ namespace {
 // ---- analysis ----------------------------------------------------------------------------
 // The window analysis (noise gate table, clarity and frequency gates, detector) is shared with the
 // classic tuner: tonemap_detect.h.
+using tonemap_detect::kGateNames;
 using tonemap_detect::kGateRms;
 constexpr uint32_t kNoWindowMs = 300;  // an active note is dropped when no window arrives for this long
 
@@ -85,7 +86,6 @@ const char* const kFlatNames[12] = {"C", "Db", "D", "Eb", "E", "F", "Gb", "G", "
 const char* const kSensNames[3] = {"Relaxed", "Medium", "Hard"};
 const char* const kHistNames[4] = {"1 s", "3 s", "30 s", "Unlimited"};
 const char* const kHoldNames[6] = {"5 s", "15 s", "30 s", "2 min", "5 min", "No fade"};
-const char* const kGateNames[4] = {"None", "Low", "Med", "High"};
 const char* const kTranspNames[4] = {"C", "Bb", "Eb", "F"};
 const char* const kPaletteNames[2] = {"Safe", "Extreme"};
 
@@ -166,7 +166,7 @@ inline uint32_t mapNow() { return (paused ? pauseStart : (uint32_t)millis()) - c
 inline int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-int gateIdx() { return clampi(settings::get().tmGate, 0, 3); }
+int gateIdx() { return tonemap_detect::gateIndex(settings::get().tmGate); }
 
 // Written note name, e.g. "A#4" / "Bb4". Caller checks the range.
 void noteName(int midi, bool flats, char* out, size_t n) {
@@ -581,7 +581,7 @@ void drawMenu(M5Canvas& c) {
     drawMenuRow(c, 1, "S", "Sensitivity", kSensNames[clampi(s.tmSens, 0, 2)]);
     drawMenuRow(c, 2, "H", "History", kHistNames[clampi(s.tmHist, 0, 3)]);
     drawMenuRow(c, 3, "C", "Color hold", kHoldNames[clampi(s.tmHold, 0, 5)]);
-    drawMenuRow(c, 4, "N", "Noise gate", kGateNames[clampi(s.tmGate, 0, 3)]);
+    drawMenuRow(c, 4, "N", "Noise gate", kGateNames[tonemap_detect::gateIndex(s.tmGate)]);
     drawMenuRow(c, 5, "K", "Transpose", kTranspNames[transpIndex(s.tmTransp)]);
     drawMenuRow(c, 6, "F", "Accidentals", s.tmFlats ? "flats" : "sharps");
     drawMenuRow(c, 7, "P", "Palette", kPaletteNames[clampi(s.tmPalette, 0, 1)]);
@@ -705,7 +705,7 @@ void onKey(const KeyEvent& e) {
                     showMessage("Color hold: %s", kHoldNames[s.tmHold]);
                     break;
                 case 'n':
-                    s.tmGate = (clampi(s.tmGate, 0, 3) + 1) % 4;
+                    s.tmGate = (tonemap_detect::gateIndex(s.tmGate) + 1) % tonemap_detect::kGateLevels;
                     settings::touch();
                     showMessage("Noise gate: %s", kGateNames[s.tmGate]);
                     break;

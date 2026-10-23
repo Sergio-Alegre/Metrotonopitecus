@@ -19,11 +19,14 @@ float nsdfBuf[mpm::kMaxLag + 2];
 
 int16_t* window() { return winBuf; }
 
-Analysis analyse(float gateRms) {
+namespace {
+
+// Everything after mpm::prepare: energy check plus noise gate, then the search and the validity gates.
+Analysis analysePrepared(const mpm::Levels& lv, float gateRms) {
     Analysis a = {};
-    const mpm::Levels lv = mpm::prepare(winBuf, tonemap_audio::kWindow, workBuf);
     a.rms = lv.rms;
     a.peak = lv.peak;
+    a.gate = gateRms;
     // Energy check (rms > 0) plus the noise gate; a gated window skips the expensive search.
     a.loud = lv.rms > 0.0f && lv.rms >= gateRms;
     if (!a.loud) return a;
@@ -37,6 +40,17 @@ Analysis analyse(float gateRms) {
         if (a.valid) a.hz = r.freq;
     }
     return a;
+}
+
+}  // namespace
+
+Analysis analyse(float gateRms) {
+    return analysePrepared(mpm::prepare(winBuf, tonemap_audio::kWindow, workBuf), gateRms);
+}
+
+Analysis analyse(AutoGate& gate, uint32_t dtMs) {
+    const mpm::Levels lv = mpm::prepare(winBuf, tonemap_audio::kWindow, workBuf);
+    return analysePrepared(lv, gate.update(lv.rms, dtMs));
 }
 
 }  // namespace tonemap_detect

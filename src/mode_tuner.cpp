@@ -31,16 +31,16 @@
 
 namespace {
 
-// Validity gate: the 'Low' ToneMap noise gate (RMS, int16 units); clarity and frequency gates are
-// the ones of tonemap_detect.
-constexpr float kGateRms = tonemap_detect::kGateRms[1];
+// Validity gate: an AUTOMATIC noise gate (tonemap_detect::AutoGate: 2.5 x the noise floor of the room, clamped to
+// 20..80; the ToneMap view keeps its manual table, setting tmGate); clarity and frequency gates are the ones of
+// tonemap_detect.
 constexpr uint32_t kHoldMs = 700;         // keep the last reading this long without new ones
 constexpr float kSmoothTauMs = 185.0f;    // reading smoothing (the old detector did 0.5 per 128 ms frame)
 constexpr float kJumpCents = 25.0f;       // larger changes are taken at once
 constexpr float kFullScale = 50.0f;       // cents at the ends of the arc
 constexpr float kGreenCents = 5.0f;
 constexpr float kRestDeg = -52.0f;        // needle parked just past the left end
-constexpr uint32_t kLedMsgMs = 1500;      // "LED: on / off" replaces the footer hint this long
+constexpr uint32_t kFooterMsgMs = 1500;   // "LED: on / off" replaces the footer hint this long
 
 // Gauge geometry: pivot below the visible area so only a slice of the arc shows.
 constexpr int kPivotX = 120;
@@ -242,8 +242,8 @@ public:
         needleDeg_ += (targetDeg_ - needleDeg_) * (1.0f - expf(-dt / 0.07f));
         if (fabsf(needleDeg_ - drawnDeg_) > 0.15f) dirty_ = true;
 
-        if (ledMsg_ && (int32_t)(now - ledMsgUntil_) >= 0) {
-            ledMsg_ = false;
+        if (footerMsg_[0] != 0 && (int32_t)(now - footerMsgUntil_) >= 0) {
+            footerMsg_[0] = 0;
             dirty_ = true;
         }
         updateLed();
@@ -355,9 +355,9 @@ public:
             c.drawString("Microphone unavailable", 4, 115);
         }
         c.setTextDatum(top_right);
-        if (ledMsg_) {
+        if (footerMsg_[0] != 0) {
             c.setTextColor(WHITE);
-            c.drawString(ledMsgOn_ ? "LED: on" : "LED: off", 236, 115);
+            c.drawString(footerMsg_, 236, 115);
         } else {
             c.setTextColor(drone ? CYAN : DARKGREY);
             c.drawString(drone ? "Space: stop drone" : "Space: drone", 236, 115);
@@ -395,6 +395,7 @@ private:
     void startCapture() {
         if (audio::micOn()) audio::micStop();  // attach() needs the mic stopped
         tonemap_audio::attach();
+        autoGate_.reset();
         capture_ = true;
         listening_ = audio::micStart() && tonemap_audio::start();
         micFailed_ = !listening_;
@@ -406,6 +407,7 @@ private:
         tonemap_audio::stop();
         audio::micStop();
         tonemap_audio::detach();  // back to the 16 kHz default
+        autoGate_.reset();
         capture_ = false;
         listening_ = false;
     }
@@ -419,7 +421,7 @@ private:
     void enterClassic() {
         resetReading();
         capture_ = false;
-        ledMsg_ = false;
+        footerMsg_[0] = 0;
         tuner_led::reset();
         if (settings::get().tmLed != 0) tuner_led::brightnessRaise();
         startCapture();
@@ -433,7 +435,7 @@ private:
         audio::droneStop();  // fade-out; the mic is already off while the drone plays
         tuner_led::offBlocking();  // while the backlight pin is still held at full brightness
         tuner_led::brightnessRestore();
-        ledMsg_ = false;
+        footerMsg_[0] = 0;
         stopCapture();
         resetReading();
     }
@@ -466,10 +468,13 @@ private:
             tuner_led::offBlocking();
             tuner_led::brightnessRestore();
         }
-        ledMsg_ = true;
-        ledMsgOn_ = s.tmLed != 0;
-        ledMsgUntil_ = millis() + kLedMsgMs;
+        showFooterMsg(s.tmLed ? "LED: on" : "LED: off");
         Serial.printf("[tuner] LED %s\n", s.tmLed ? "on" : "off");
+    }
+
+    void showFooterMsg(const char* text) {
+        strlcpy(footerMsg_, text, sizeof(footerMsg_));
+        footerMsgUntil_ = millis() + kFooterMsgMs;
     }
 
     void droneNoteChanged() {
@@ -511,7 +516,9 @@ private:
 
     void processWindow(const tonemap_audio::WindowInfo& wi, uint32_t now) {
         const float refA = settings::get().refA;
-        const tonemap_detect::Analysis an = tonemap_detect::analyse(kGateRms);
+        // Every window goes through prepare() and updates the automatic gate (also those below it, so that the floor
+        // can fall in silence); findPitch only runs above the threshold.
+        const tonemap_detect::Analysis an = tonemap_detect::analyse(autoGate_, wi.dtMs);
 
         // Nearest note over the whole range (written = concert pitch, no transposition).
         // The octave guard folds short one-octave excursions back into the previous octave (an invalid window resets it).
@@ -549,8 +556,8 @@ private:
 
         if (now - lastLogMs_ > 500) {
             lastLogMs_ = now;
-            Serial.printf("[tuner] rms=%.0f peak=%.0f valid=%d f=%.2f clarity=%.2f -> %s", an.rms, an.peak,
-                          (int)an.valid, an.hz, an.clarity, accepted ? "ok" : "ignored");
+            Serial.printf("[tuner] rms=%.0f gate=%.0f peak=%.0f valid=%d f=%.2f clarity=%.2f -> %s", an.rms, an.gate,
+                          an.peak, (int)an.valid, an.hz, an.clarity, accepted ? "ok" : "ignored");
             if (accepted) {
                 Serial.printf(" note=%s%d%s %+.1f cents\n", kNoteLetters[midi_ % 12], midi_ / 12 - 1,
                               kNoteSharp[midi_ % 12] ? "#" : "", cents_);
@@ -566,6 +573,7 @@ private:
     bool micFailed_ = false;  // the last startCapture() failed
     bool hasReading_ = false;
     tonemap_detect::OctaveGuard octaveGuard_;
+    tonemap_detect::AutoGate autoGate_;  // reset with the capture (enter / leave / drone on-off), not per lost reading
     int midi_ = -1;           // nearest note of the last reading
     float cents_ = 0;         // smoothed, relative to midi_
     float freq_ = 0;
@@ -580,9 +588,8 @@ private:
     uint32_t lastDrawMs_ = 0;
     uint32_t lastLogMs_ = 0;
     bool dirty_ = true;
-    bool ledMsg_ = false;     // transient "LED: on / off" in the footer
-    bool ledMsgOn_ = false;
-    uint32_t ledMsgUntil_ = 0;
+    char footerMsg_[16] = "";  // transient footer text ("LED: on"); empty = none
+    uint32_t footerMsgUntil_ = 0;
 #ifdef TUNER_DEBUG
     uint32_t dbgFrames_ = 0, dbgRecFails_ = 0, dbgRefreshMs_ = 0;
     float dbgRms_ = 0, dbgPeak_ = 0, dbgFreq_ = 0, dbgClarity_ = 0;
