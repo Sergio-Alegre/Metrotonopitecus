@@ -13,6 +13,11 @@
 // tonemap::freqToNote). While the drone plays the tuner is not listening, and the whole gauge
 // turns grey to show it: the ADV microphone and speaker share clock pins, so the microphone is off
 // while the drone plays (and the drone would be what the mic hears anyway).
+//
+// LED (key L, shared on/off setting tmLed with the ToneMap view): the RGB LED lights green while the
+// displayed (smoothed) reading is inside the green band (+-5 cents) and is off otherwise: no reading,
+// drone playing, mic failed, LED off, view or mode switch. The LED needs the screen at full brightness
+// (see tuner_led.h), so the brightness is raised while the LED setting is on and restored on every exit.
 #include <math.h>
 
 #include "audio.h"
@@ -22,6 +27,7 @@
 #include "tonemap_detect.h"
 #include "tonemap_model.h"
 #include "tonemap_view.h"
+#include "tuner_led.h"
 
 namespace {
 
@@ -34,6 +40,7 @@ constexpr float kJumpCents = 25.0f;       // larger changes are taken at once
 constexpr float kFullScale = 50.0f;       // cents at the ends of the arc
 constexpr float kGreenCents = 5.0f;
 constexpr float kRestDeg = -52.0f;        // needle parked just past the left end
+constexpr uint32_t kLedMsgMs = 1500;      // "LED: on / off" replaces the footer hint this long
 
 // Gauge geometry: pivot below the visible area so only a slice of the arc shows.
 constexpr int kPivotX = 120;
@@ -197,6 +204,7 @@ public:
                 break;
             case Key::Char:
                 if (e.ch == 'p') toggleDrone();
+                if (e.ch == 'l') toggleLed();
 #ifdef TUNER_DEBUG
                 if (e.ch == 'b' || e.ch == 'q' || e.ch == 's') {
                     stopCapture();  // the sound experiments need the speaker
@@ -227,11 +235,18 @@ public:
         lastUpdateMs_ = now;
         if (hasReading_ && now - lastReadingMs_ > kHoldMs) {
             hasReading_ = false;
+            octaveGuard_.reset();
             dirty_ = true;
         }
         targetDeg_ = hasReading_ ? constrain(cents_, -kFullScale, kFullScale) : kRestDeg;
         needleDeg_ += (targetDeg_ - needleDeg_) * (1.0f - expf(-dt / 0.07f));
         if (fabsf(needleDeg_ - drawnDeg_) > 0.15f) dirty_ = true;
+
+        if (ledMsg_ && (int32_t)(now - ledMsgUntil_) >= 0) {
+            ledMsg_ = false;
+            dirty_ = true;
+        }
+        updateLed();
     }
 
     bool draw(M5Canvas& c, bool force) override {
@@ -271,7 +286,7 @@ public:
         }
 
         // Needle (starts at the inside edge of the label ring: the dial's inside is for the note)
-        const bool inTune = shown && fabsf(cents_) <= kGreenCents;
+        const bool inTune = inTuneNow();
         const uint16_t needleCol = (drone || !hasReading_) ? c.color565(90, 90, 90) : (inTune ? GREEN : RED);
         c.drawWedgeLine(polarX(kNeedleInner, needleDeg_), polarY(kNeedleInner, needleDeg_),
                         polarX(kBandOuter + 4, needleDeg_), polarY(kBandOuter + 4, needleDeg_), 3.0f, 1.0f, needleCol);
@@ -340,8 +355,13 @@ public:
             c.drawString("Microphone unavailable", 4, 115);
         }
         c.setTextDatum(top_right);
-        c.setTextColor(drone ? CYAN : DARKGREY);
-        c.drawString(drone ? "Space: stop drone" : "Space: drone", 236, 115);
+        if (ledMsg_) {
+            c.setTextColor(WHITE);
+            c.drawString(ledMsgOn_ ? "LED: on" : "LED: off", 236, 115);
+        } else {
+            c.setTextColor(drone ? CYAN : DARKGREY);
+            c.drawString(drone ? "Space: stop drone" : "Space: drone", 236, 115);
+        }
 
 #ifdef TUNER_DEBUG
         c.setFont(&fonts::Font0);
@@ -393,11 +413,15 @@ private:
     void resetReading() {
         hasReading_ = false;
         midi_ = -1;
+        octaveGuard_.reset();  // enter / leave / drone on-off / reference change: the guard never outlives the reading
     }
 
     void enterClassic() {
         resetReading();
         capture_ = false;
+        ledMsg_ = false;
+        tuner_led::reset();
+        if (settings::get().tmLed != 0) tuner_led::brightnessRaise();
         startCapture();
         needleDeg_ = kRestDeg;
         targetDeg_ = kRestDeg;
@@ -407,8 +431,45 @@ private:
 
     void leaveClassic() {
         audio::droneStop();  // fade-out; the mic is already off while the drone plays
+        tuner_led::offBlocking();  // while the backlight pin is still held at full brightness
+        tuner_led::brightnessRestore();
+        ledMsg_ = false;
         stopCapture();
         resetReading();
+    }
+
+    // In tune right now, as the screen shows it: a reading is displayed (not while the drone plays) and the
+    // smoothed deviation is inside the green band. Needle colour, big note and LED all use this.
+    bool inTuneNow() const { return hasReading_ && !audio::droneOn() && fabsf(cents_) <= kGreenCents; }
+
+    // Called every loop in the classic view: green while in tune, otherwise off; sends the pending repeats.
+    void updateLed() {
+        const bool want = settings::get().tmLed != 0 && listening_ && inTuneNow();
+        if (want != tuner_led::lit()) {
+            tuner_led::setLit(want);
+            if (want) {
+                tuner_led::show(0, 255, 0);  // same green as the metronome beats
+            } else {
+                tuner_led::show(0, 0, 0);
+            }
+        }
+        tuner_led::service();
+    }
+
+    void toggleLed() {
+        auto& s = settings::get();
+        s.tmLed = s.tmLed ? 0 : 1;
+        settings::touch();
+        if (s.tmLed) {
+            tuner_led::brightnessRaise();
+        } else {
+            tuner_led::offBlocking();
+            tuner_led::brightnessRestore();
+        }
+        ledMsg_ = true;
+        ledMsgOn_ = s.tmLed != 0;
+        ledMsgUntil_ = millis() + kLedMsgMs;
+        Serial.printf("[tuner] LED %s\n", s.tmLed ? "on" : "off");
     }
 
     void droneNoteChanged() {
@@ -453,8 +514,10 @@ private:
         const tonemap_detect::Analysis an = tonemap_detect::analyse(kGateRms);
 
         // Nearest note over the whole range (written = concert pitch, no transposition).
+        // The octave guard folds short one-octave excursions back into the previous octave (an invalid window resets it).
+        const float hz = octaveGuard_.filter(an.hz, an.valid);
         tonemap::NoteHit hit = {-1, 0.0f, 0.0f, 0.0f};
-        if (an.valid) hit = tonemap::freqToNote(an.hz, refA);
+        if (an.valid) hit = tonemap::freqToNote(hz, refA);
         const bool accepted = hit.concertMidi >= tonemap::kGridLo && hit.concertMidi <= tonemap::kGridHi;
 
 #ifdef TUNER_DEBUG
@@ -502,6 +565,7 @@ private:
     bool listening_ = false;  // microphone on and capture running
     bool micFailed_ = false;  // the last startCapture() failed
     bool hasReading_ = false;
+    tonemap_detect::OctaveGuard octaveGuard_;
     int midi_ = -1;           // nearest note of the last reading
     float cents_ = 0;         // smoothed, relative to midi_
     float freq_ = 0;
@@ -516,6 +580,9 @@ private:
     uint32_t lastDrawMs_ = 0;
     uint32_t lastLogMs_ = 0;
     bool dirty_ = true;
+    bool ledMsg_ = false;     // transient "LED: on / off" in the footer
+    bool ledMsgOn_ = false;
+    uint32_t ledMsgUntil_ = 0;
 #ifdef TUNER_DEBUG
     uint32_t dbgFrames_ = 0, dbgRecFails_ = 0, dbgRefreshMs_ = 0;
     float dbgRms_ = 0, dbgPeak_ = 0, dbgFreq_ = 0, dbgClarity_ = 0;

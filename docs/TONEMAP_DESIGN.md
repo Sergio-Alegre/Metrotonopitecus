@@ -870,3 +870,100 @@ dejan de ser "verde / blanco" y pasan a mostrar el color de la desviación **ins
 - Hallazgo: la app no abre el puerto USB CDC por sí sola; `Serial.println` no llega al PC sin `Serial.begin(115200)`. Se añadió solo en el build
   `TONEMAP_DEBUG` (`tonemap::enter()`); la app normal sigue sin llamarlo (los logs `[mode]`, `[settings]`, `[tonemap]` solo salen con ese build o con un monitor
   que ya haya abierto el puerto).
+
+## 14. LED compartido con la vista clásica e icono de batería (2026-10-23)
+
+### 14.1 `tuner_led.h/.cpp`
+
+Los primitivos del LED que estaban en `tonemap_view.cpp` pasaron, sin cambiar constantes ni comportamiento, a un módulo pequeño
+`tuner_led` (namespace con estado propio, sin dependencias de `tonemap_audio/model/detect`, así que el entorno bench sigue
+compilando):
+
+| Función | Qué hace |
+|---|---|
+| `reset()` | olvida una ejecución anterior (`lit` = false, sin repeticiones); no toca el brillo |
+| `brightnessRaise()` / `brightnessRestore()` | guarda el brillo del usuario y pone 255 / lo devuelve (no-op si no se subió) |
+| `show(r,g,b)` | envía `neopixelWrite` ya y programa 2 repeticiones (a los 6 ms y 12 ms) |
+| `service()` | cada iteración del bucle: manda las repeticiones pendientes |
+| `offBlocking()` | 3 órdenes de apagado separadas 6 ms, antes de restaurar el brillo; solo actúa si el LED puede estar encendido |
+| `lit()` / `setLit()` / `red()` / `green()` / `blue()` | bandera "puede estar encendido" (la lleva quien llama) y último color enviado |
+
+La vista ToneMap conserva su lógica de color vivo (`ledUpdate`: umbral de 16 niveles y 50 ms) y solo cambia las llamadas. La
+vista clásica (`mode_tuner.cpp`) usa el mismo módulo: verde `(0,255,0)` cuando `inTuneNow()` (lectura mostrada, sin drone,
+|cents suavizados| ≤ 5, la misma condición que pinta aguja, nota y cents en verde), apagado en cualquier otro caso. El
+metrónomo conserva su copia propia del código (no se refactoriza).
+
+**Un solo dueño del LED y del brillo.** El estado está en un único sitio (`brightRaised`, `userBrightness`), y el cambio de vista
+siempre hace `leave()` de una vista (`offBlocking` + `brightnessRestore`) y luego `enter()` de la otra (`brightnessRaise` lee ya
+el brillo restaurado): `TunerMode::onReselect` llama a `tonemap::leave()` y después a `enterClassic()`, o a `leaveClassic()` y
+después a `tonemap::enter()`. `TunerMode::leave` (cambio de modo) pasa por la misma salida de la vista activa. Al entrar al
+metrónomo, éste lee el brillo ya restaurado. Con `L` off ninguna vista sube el brillo.
+
+### 14.2 Lectura de la batería (`battery.h/.cpp`, icono en `main.cpp`)
+
+- **Qué da M5Unified 0.2.25** para el Cardputer y el Cardputer ADV: ambas placas usan el PMIC virtual `pmic_adc`: ADC1 en el GPIO10
+  con divisor ×2 (`_adc_ratio = 2.0`), leído con `analogReadMilliVolts` (calibrado). `getBatteryVoltage()` devuelve mV (0 si la
+  lectura falla) y `getBatteryLevel()` los convierte linealmente: `(mV − 3300) × 100 / 800`, recortado a 0..100 (≈ 3,3 V = 0 %,
+  ≥ 4,1 V = 100 %); nunca devuelve < 0 con este PMIC. **`isCharging()` devuelve `charge_unknown`** para estas placas (no hay
+  rama para ellas: no hay chip de carga legible), así que el indicador de carga no se activa nunca; la rama está lista por si
+  una versión futura de M5Unified la implementa.
+- **Muestreo:** cada 5 s, mediana de 5 lecturas de `getBatteryLevel()` seguidas (quita el ruido del ADC). Si `getBatteryVoltage()`
+  queda fuera de 2500..4700 mV (0 = lectura fallida, o pin flotante sin batería) o el nivel es < 0, la lectura vale −1.
+- **Suavizado:** mediana de las 3 últimas lecturas (−1 incluido) → segmentos; el icono solo cambia cuando el nuevo número de
+  segmentos se repite en 2 lecturas seguidas (histéresis temporal: un cambio tarda 10-15 s, razonable para una batería). La
+  primera lectura se muestra al instante (`battery::begin()` en `setup()`).
+- **Segmentos:** `ceil(nivel / 20)`, mínimo 1 con nivel > 0, 0 con nivel 0, −1 = no disponible (21..40 % = 2 segmentos amarillos,
+  1..20 % = 1 segmento rojo, 0 % = contorno rojo vacío).
+- **Dibujo** (`drawBattery` en `main.cpp`, filas y+2..y+8 de la barra, x0 = 226): contorno 12 × 7 + saliente de 1 × 3 (13 px), cinco
+  segmentos de 2 × 5 px dentro del contorno, sin huecos. Colores: normal = `kVolColor` (el del texto `Vol`, cian), 2 segmentos
+  = amarillo, 1 o 0 = rojo, no disponible = contorno `DARKGREY` sin segmentos, carga (si algún día se informa) = contorno blanco.
+  El texto `Vol` se alinea a la derecha del icono con 3 px de hueco (`Vol 10` pierde el espacio si no cabe junto al último modo).
+- **Redibujado:** `loop()` llama a `battery::tick(millis())`; si cambia el número de segmentos (o la carga) se llama a `drawBar()`.
+  Los modos no intervienen (la barra es de `main.cpp`).
+- **Depuración:** solo con `TUNER_DEBUG` o `TONEMAP_DEBUG`, una línea serie cada 5 s:
+  `[battery] raw=<nivel> mv=<mV> charging=<0 no|1 sí|2 desconocido> hist=a,b,c cand=<segmentos> segs=<segmentos mostrados>`
+  (con `Serial.begin(115200)` en `battery::begin()`, solo en esos entornos). El entorno normal no tiene log ni superposición.
+
+## 15. Guardia de continuidad de octava (2026-10-23)
+
+### 15.1 Por qué
+
+Aun con el K híbrido (§12), el detector da excursiones cortas de una octava: sobre grabaciones de viola reproducidas con el detector
+C++ en Python, F3/E3/D3 salen como F4/E4/D4 durante 1-6 fotogramas, y el re-pick con K = 0,97 produce algún fotograma A3 → A2 o
+D4 → D2. En ToneMap manchan de color las celdas de la octava vecina y en el afinador clásico hacen parpadear la nota y la aguja.
+
+### 15.2 Regla (`tonemap_detect::OctaveGuard`, solo cabecera)
+
+Se aplica a la frecuencia **bruta** (sin transponer) de cada ventana analizada, una vez por ventana y tras las puertas de validez.
+Estado por instancia: referencia `ref` (última frecuencia aceptada) y cuenta `count`.
+
+- Ventana no válida (o Hz ≤ 0): `reset()` y se devuelve la entrada.
+- Primer fotograma válido tras un reinicio: `ref = hz`, `count = 0`, devuelve `hz`.
+- Si no, `l = log2(hz / ref)`. Si `|l − 1| < 0,04` o `|l + 1| < 0,04` (`kOctaveGuardTolOct`, 48 cents alrededor de la octava exacta):
+  `count++`; con `count ≥ 4` (`kOctaveGuardFrames`) se acepta (`ref = hz`, `count = 0`, devuelve `hz`); si no, devuelve la frecuencia
+  **plegada** (`hz / 2` si estaba por encima, `hz × 2` si por debajo) **sin tocar `ref`**, de modo que la nota sigue en la octava anterior.
+- Cualquier otra relación (glissando, vibrato, otra nota): `ref = hz`, `count = 0`, devuelve `hz`. Un fotograma que no es un salto de
+  octava también rompe la cuenta de saltos consecutivos.
+- Con N = 4 la simulación sobre la grabación larga reduce los saltos de octava de 33 a 16 y no retrasa nada más.
+
+### 15.3 Integración
+
+- **ToneMap** (`tonemap_view.cpp`, instancia propia `octaveGuard`): `hz = octaveGuard.filter(an.hz, valid)` justo antes de `model.tick`.
+  Se reinicia donde se pierde la nota activa: `dropNote()` (pausa, salir de la vista, fin de ventanas a los 300 ms), `enter()`, cambio de
+  transposición (`K`, que termina la nota) y borrado del mapa (`R`). Así la guardia nunca sobrevive a la nota activa del modelo.
+- **Afinador clásico** (`mode_tuner.cpp`, instancia propia `octaveGuard_`): `hz = octaveGuard_.filter(an.hz, an.valid)` antes de
+  `tonemap::freqToNote`. Se reinicia al perder la lectura (fin de los 700 ms de retención) y en `resetReading()` (entrar, salir,
+  encender/apagar el drone, cambiar La). No cambian la retención de 700 ms ni el suavizado de 185 ms.
+- Un fotograma no válido reinicia la guardia aunque la vista clásica mantenga la lectura 700 ms; es coherente con el modelo de ToneMap,
+  donde un fotograma no válido termina la nota.
+
+### 15.4 Pruebas y riesgos
+
+- Banco (`[test] octave guard`, función pura, expectativas calculadas a mano): 175 Hz ×10 sin cambios; 350 ×2 y luego 175 → los dos
+  350 salen plegados a 175; 350 sostenido → fotogramas 1-3 plegados (175), el 4.º devuelve 350 y la guardia lo sigue; lo mismo hacia
+  abajo (350 estable, 175 ×3 → 350 plegado, el 4.º acepta 175); salto de +7 semitonos (175 → 262,2) aceptado al instante y que
+  limpia la cuenta; fotograma no válido reinicia (350 pasa a ser referencia de inmediato); un fotograma intermedio que no es octava
+  rompe la cuenta; borde de tolerancia (2,04 pliega, 2,06 no).
+- Riesgo: un salto de octava real (p. ej. el intérprete pasa de F3 a F4) tarda 3 fotogramas (~96-128 ms) en mostrarse. Con una nota
+  muy corta y aguda justo una octava por encima de la anterior, hasta 3 fotogramas pueden quedar plegados.
+- Sin comprobar en el dispositivo: el efecto real sobre la viola en vivo.

@@ -35,6 +35,13 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
 
 - Barra inferior de una línea de texto + línea de 1 px encima: `M:Metro T:Tuner G:Game A:About`, modo
   activo resaltado, volumen a la derecha.
+- **Icono de batería** en el extremo derecho de la barra, pegado al volumen (13 × 7 px, sin porcentaje; el texto `Vol` se
+  desplaza a la izquierda lo que ocupa el icono, y pierde su espacio, `Vol10`, solo si no cabe junto a los modos). Precisión
+  de 1/5: cinco segmentos de 20 % cada uno (`ceil(nivel / 20)`, al menos 1 mientras el nivel sea > 0, 0 con nivel 0).
+  Color: normal = el del texto `Vol`; **exactamente 2 segmentos = amarillo**; **1 o 0 = rojo** (contorno y segmentos); sin verde.
+  Lectura no disponible (nivel < 0 o tensión no plausible) = contorno gris sin segmentos. Si la placa informara de carga,
+  el contorno sería blanco (el ADV no da ese dato, ver `TONEMAP_DESIGN.md` §14). Se lee cada ~5 s, con mediana y
+  persistencia (ver §14), y solo se redibuja la barra cuando cambia el número de segmentos.
 - Teclas globales: `M` metrónomo, `T` afinador, `G` juego, `A` extra (nombre por decidir; de momento "About").
 - Volumen global (clic del metrónomo y nota de referencia): `-`/`_` baja, `=`/`+` sube.
 - Sonido del clic del metrónomo: todos los clics a 1400 Hz; la importancia se marca con el volumen (ganancia por clic sobre el
@@ -88,8 +95,22 @@ Pantalla 240x135 (rotación 1). Todo el texto en inglés (ver CLAUDE.md). Interf
   común en `tonemap_detect.*`). Una lectura nueva por ventana (~31/s); suavizado exponencial de ~185 ms mientras la
   nota no cambia (un cambio de nota o un salto de más de 25 cents se toma al instante) y la lectura se mantiene 0,7 s
   sin ventanas válidas antes de devolver la aguja al reposo.
+- **Guardia de continuidad de octava** (en `tonemap_detect`, común a las dos vistas del afinador): un fotograma cuya
+  frecuencia queda a una octava exacta (±0,04 octava = 48 cents) por encima o por debajo del fotograma anterior se
+  devuelve plegado a la octava anterior, y solo se acepta como salto real si se repite en **4 fotogramas seguidos** (~128 ms).
+  Cualquier otra relación (glissando, vibrato, otra nota) se acepta al instante y rompe la cuenta; un fotograma no válido
+  reinicia la guardia. Corrige las excursiones breves de una octava del detector con notas graves (F3/E3/D3 leídas como
+  F4/E4/D4, A3 → A2). Un salto de octava real tarda 3 fotogramas más en reflejarse. Detalle y cifras: `TONEMAP_DESIGN.md` §15.
 - En el ADV micrófono y altavoz comparten reloj I2S: con el drone sonando no se escucha (la aguja y el dial se ponen
   grises y el centro dice `Mic off (drone playing)`).
+- **LED** (tecla `L`, mismo ajuste `tmLed` que la vista ToneMap, por defecto on): el LED RGB (GPIO 21) se pone **verde
+  `(0,255,0)`** mientras la aguja está dentro de la franja verde (|cents| ≤ 5 con el valor suavizado que ya usa la vista para
+  poner nota y cents en verde) y **apagado** el resto del tiempo (sin rojo ni otros colores): sin lectura, con el drone
+  sonando (micro apagado), micro no disponible, LED off, al cambiar de vista, de modo o de pantalla. Misma restricción de
+  hardware que el metrónomo: solo funciona con la pantalla a brillo 255, así que con `L` on la vista guarda el brillo del
+  usuario, sube a 255 y lo restaura al salir de la vista o del modo, o al poner `L` off; cada orden se repite dos veces.
+  Al pulsar `L` el pie de pantalla dice `LED: on` / `LED: off` durante 1,5 s en lugar de `Space: drone`. Código común con la
+  vista ToneMap en `tuner_led.*` (`TONEMAP_DESIGN.md` §14).
 
 ### Afinador — vista ToneMap
 
@@ -258,7 +279,8 @@ Añadir A (clarinete en La, −3) es trivial si Sergio lo pide más adelante.
   retroiluminación y **solo funciona con la pantalla a brillo 255**. Con LED on, la vista ToneMap guarda el brillo
   del usuario, pone 255 y lo restaura al salir de la vista o del modo, o al poner LED off.
   Repetir cada orden del LED dos veces (a los 6 y 12 ms), como hace el metrónomo.
-- No refactorizar el código del LED del metrónomo; duplicar el mínimo necesario en el código de ToneMap.
+- El código del LED del metrónomo no se toca. Los primitivos del LED y del brillo (enviar con repeticiones, apagado
+  bloqueante, subir/restaurar brillo) viven en `tuner_led.*`, compartidos con la vista clásica del afinador.
 
 #### Fuera de alcance en la v1
 

@@ -23,6 +23,7 @@
 #include "tonemap_audio.h"
 #include "tonemap_detect.h"
 #include "tonemap_model.h"
+#include "tuner_led.h"
 
 namespace tonemap {
 
@@ -75,12 +76,7 @@ constexpr uint16_t kColRefA = rgb565(255, 255, 0);
 constexpr uint16_t kColTransp = rgb565(103, 232, 249);
 constexpr uint16_t kColError = rgb565(239, 68, 68);
 
-// ---- LED (copy of the minimum from mode_metronome.cpp) -----------------------------------
-constexpr int kLedPin = 21;
-constexpr uint8_t kLedMinBrightness = 255;
-constexpr int kLedResends = 2;
-constexpr uint32_t kLedResendMs = 6;
-constexpr int kLedOffSends = 3;
+// ---- LED (the send / repeat / brightness helpers are shared with the classic view: tuner_led.h) ------
 constexpr int kLedStep = 16;             // a new live colour is sent when a channel moved by this much ...
 constexpr uint32_t kLedMinGapMs = 50;    // ... and at most this often (note start / stop are never delayed)
 
@@ -97,6 +93,7 @@ const char* const kPaletteNames[2] = {"Safe", "Extreme"};
 // The heat map: ~38 KB in .bss (Model has an empty constructor), never on the stack. It lives as
 // long as the firmware runs, so it survives mode and view switches.
 Model model;
+tonemap_detect::OctaveGuard octaveGuard;  // raw Hz continuity, per active note (never outlives it)
 
 // Map clock: millis() minus the time spent paused, so the fades freeze while paused.
 uint32_t clockOffset = 0;
@@ -127,14 +124,8 @@ char msgText[32];
 bool msgActive = false;
 uint32_t msgUntil = 0;
 
-// LED + brightness.
-bool brightRaised = false;
-uint8_t userBrightness = 128;
-bool ledLit = false;       // the LED shows the live colour of the active note
+// LED (tuner_led keeps the lit flag, the last colour sent, the repeats and the brightness).
 uint32_t ledSentMs = 0;    // when the live colour was last sent
-int ledResends = 0;
-uint32_t ledResendAt = 0;
-uint8_t ledR = 0, ledG = 0, ledB = 0;
 
 // What the last drawn frame showed, to decide whether a new frame is needed.
 struct Snapshot {
@@ -210,48 +201,7 @@ void showMessage(const char* fmt, const char* arg) {
 }
 
 // ---- LED and brightness ------------------------------------------------------------------
-// The LED (SK6812) is on GPIO21 and M5.Led does nothing with this Arduino core.
-void ledSend(uint8_t r, uint8_t g, uint8_t b) { neopixelWrite(kLedPin, r, g, b); }
-
-// Sets the LED now and schedules the repeats that make up for a command lost to the backlight PWM.
-void ledShow(uint8_t r, uint8_t g, uint8_t b) {
-    ledR = r;
-    ledG = g;
-    ledB = b;
-    ledSend(r, g, b);
-    ledResends = kLedResends;
-    ledResendAt = millis() + kLedResendMs;
-}
-
-// Blocking off: used before the brightness is restored, so that the commands are sent while the
-// backlight pin is still held high. Only does something if the LED may be on.
-void ledOffBlocking() {
-    if (ledLit || ledResends > 0) {
-        for (int i = 0; i < kLedOffSends; ++i) {
-            ledSend(0, 0, 0);
-            delay(kLedResendMs);
-        }
-    }
-    ledLit = false;
-    ledResends = 0;
-    ledR = ledG = ledB = 0;
-}
-
-void brightnessRaise() {
-    if (brightRaised) return;
-    const uint8_t b = M5Cardputer.Display.getBrightness();
-    if (b < kLedMinBrightness) {
-        userBrightness = b;
-        M5Cardputer.Display.setBrightness(kLedMinBrightness);
-        brightRaised = true;
-    }
-}
-
-void brightnessRestore() {
-    if (!brightRaised) return;
-    M5Cardputer.Display.setBrightness(userBrightness);
-    brightRaised = false;
-}
+// The LED primitives (show with repeats, blocking off, brightness raise / restore) are in tuner_led.cpp.
 
 // Live colour of the note sounding now: the instantaneous deviation (raw per-frame errRatio) in the active palette,
 // full intensity (docs/TONEMAP_DESIGN.md section 13.8).
@@ -265,24 +215,21 @@ void ledUpdate() {
     const bool want = settings::get().tmLed != 0 && !paused && hasNote;
     const uint32_t nowMs = millis();
     if (!want) {
-        if (ledLit) {
-            ledLit = false;
-            ledShow(0, 0, 0);
+        if (tuner_led::lit()) {
+            tuner_led::setLit(false);
+            tuner_led::show(0, 0, 0);
         }
     } else {
         const Rgb c = liveRgb();
-        const bool moved = absDiff(c.r, ledR) >= kLedStep || absDiff(c.g, ledG) >= kLedStep || absDiff(c.b, ledB) >= kLedStep;
-        if (!ledLit || (moved && (uint32_t)(nowMs - ledSentMs) >= kLedMinGapMs)) {
-            ledLit = true;
+        const bool moved = absDiff(c.r, tuner_led::red()) >= kLedStep || absDiff(c.g, tuner_led::green()) >= kLedStep ||
+                           absDiff(c.b, tuner_led::blue()) >= kLedStep;
+        if (!tuner_led::lit() || (moved && (uint32_t)(nowMs - ledSentMs) >= kLedMinGapMs)) {
+            tuner_led::setLit(true);
             ledSentMs = nowMs;
-            ledShow(c.r, c.g, c.b);
+            tuner_led::show(c.r, c.g, c.b);
         }
     }
-    if (ledResends > 0 && (int32_t)(millis() - ledResendAt) >= 0) {
-        ledSend(ledR, ledG, ledB);
-        --ledResends;
-        ledResendAt += kLedResendMs;
-    }
+    tuner_led::service();
 }
 
 // ---- model <-> settings ------------------------------------------------------------------
@@ -341,7 +288,7 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
     const tonemap_detect::Analysis an = tonemap_detect::analyse(kGateRms[gateIdx()]);
     const bool loud = an.loud;
     const bool valid = an.valid;
-    const float hz = an.hz;
+    const float hz = octaveGuard.filter(an.hz, valid);  // short one-octave excursions folded back
 
     const TickResult t = model.tick(valid, hz, wi.dtMs, mapNow());
 
@@ -383,6 +330,7 @@ void analyse(const tonemap_audio::WindowInfo& wi) {
 }
 
 void dropNote() {
+    octaveGuard.reset();
     model.endNote();
     hasNote = false;
     noteInZone = false;
@@ -666,8 +614,9 @@ void enter() {
     micOk = audio::micStart();
     if (!micOk) Serial.println("[tonemap] microphone unavailable");
 
-    if (settings::get().tmLed != 0) brightnessRaise();
+    if (settings::get().tmLed != 0) tuner_led::brightnessRaise();
     paused = false;
+    octaveGuard.reset();
     syncModel(mapNow());
 
     hasNote = false;
@@ -675,8 +624,7 @@ void enter() {
     gateOpen = false;
     level = 0.0f;
     msgActive = false;
-    ledLit = false;
-    ledResends = 0;
+    tuner_led::reset();
     analysedThisLoop = false;
     lastWindowMs = millis();
     lastFadePollMs = millis();
@@ -700,8 +648,8 @@ void leave() {
     Serial.println("[tonemap] leave");
 
     tonemap_audio::stop();
-    ledOffBlocking();          // while the backlight pin is still held at full brightness
-    brightnessRestore();
+    tuner_led::offBlocking();  // while the backlight pin is still held at full brightness
+    tuner_led::brightnessRestore();
     audio::micStop();          // waits for the chunks in flight, then brings the speaker back
     tonemap_audio::detach();   // back to the 16 kHz default (the other modes never record)
     dropNote();
@@ -765,6 +713,7 @@ void onKey(const KeyEvent& e) {
                     const int idx = (transpIndex(s.tmTransp) + 1) % 4;
                     s.tmTransp = kTransposeSemis[idx];
                     model.setTransposition(s.tmTransp, now);  // also ends the active note
+                    octaveGuard.reset();
                     hasNote = false;
                     noteInZone = false;
                     settings::touch();
@@ -780,10 +729,10 @@ void onKey(const KeyEvent& e) {
                     s.tmLed = s.tmLed ? 0 : 1;
                     settings::touch();
                     if (s.tmLed) {
-                        brightnessRaise();
+                        tuner_led::brightnessRaise();
                     } else {
-                        ledOffBlocking();
-                        brightnessRestore();
+                        tuner_led::offBlocking();
+                        tuner_led::brightnessRestore();
                     }
                     showMessage("LED: %s", s.tmLed ? "on" : "off");
                     break;
@@ -795,6 +744,7 @@ void onKey(const KeyEvent& e) {
                     break;
                 case 'r':
                     model.reset(now);
+                    octaveGuard.reset();
                     hasNote = false;
                     noteInZone = false;
                     showMessage("%s", "Map cleared");

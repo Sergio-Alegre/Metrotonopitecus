@@ -10,11 +10,17 @@ namespace {
 
 constexpr uint8_t kDroneChannel = 0;
 constexpr uint8_t kClickChannel = 1;
-// One sine cycle, 8-bit unsigned. The speaker reads it at freq * kSineLen Hz,
+// One drone cycle, 8-bit unsigned. The speaker reads it at freq * kSineLen Hz,
 // which must stay below its 48 kHz output rate (988 Hz * 48 = 47.4 kHz); the
 // proven working range of the M5Unified resampler. Linear interpolation of 48
 // points per cycle keeps distortion under -50 dB.
 constexpr size_t kSineLen = 48;
+
+// Drone timbre: a pure sine sounded thin and nasal on the Cardputer's tiny speaker, which barely reproduces
+// the low fundamentals (the 8-bit steps and speaker rattle dominate). The cycle is the fundamental plus a few
+// weak harmonics (an organ-flute-like tone): the ear still hears the fundamental pitch (missing-fundamental
+// effect) and the note carries on the speaker. Relative amplitudes of harmonics 1..4; tune by ear.
+constexpr float kDroneHarmonics[] = {1.0f, 0.5f, 0.25f, 0.12f};
 
 uint8_t sineTable[kSineLen];
 bool droneActive = false;
@@ -98,8 +104,18 @@ uint8_t levelToVolume(int level) {
 namespace audio {
 
 void begin() {
+    float cycle[kSineLen];
+    float peak = 0.0f;
     for (size_t i = 0; i < kSineLen; ++i) {
-        sineTable[i] = (uint8_t)lroundf(128.0f + 127.0f * sinf(2.0f * (float)M_PI * i / kSineLen));
+        float v = 0.0f;
+        for (size_t h = 0; h < sizeof(kDroneHarmonics) / sizeof(kDroneHarmonics[0]); ++h) {
+            v += kDroneHarmonics[h] * sinf(2.0f * (float)M_PI * (float)(h + 1) * i / kSineLen);
+        }
+        cycle[i] = v;
+        if (fabsf(v) > peak) peak = fabsf(v);
+    }
+    for (size_t i = 0; i < kSineLen; ++i) {
+        sineTable[i] = (uint8_t)lroundf(128.0f + 127.0f * cycle[i] / peak);  // normalised to full scale
     }
     setVolumeLevel(settings::get().volume);
 
