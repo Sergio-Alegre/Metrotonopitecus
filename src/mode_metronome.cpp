@@ -35,13 +35,13 @@ constexpr uint8_t kLedMinBrightness = 255;
 constexpr int kLedResends = 2;
 constexpr uint32_t kLedResendMs = 6;
 // Bottom row: beats from the left, "B: beats" hint at the right. The circles' bottom
-// (centre + 8 = row 120) leaves 4 free rows above the 125 px content area's end, and the
+// (centre + 8 = row 118) leaves 6 free rows above the 125 px content area's end, and the
 // hint's text sits on that same bottom line.
-constexpr int kBottomY = 112;
+constexpr int kBottomY = 110;
 constexpr int kHintBottomY = kBottomY + kBeatRadius + 1;  // bottom of the hint's text box
 // The tempo block (number, arrows) and the subdivision move together, anchored to the
 // vertical centre of the tempo number.
-constexpr int kRowY = 62;
+constexpr int kRowY = 57;
 // The tempo number and the subdivision figure are 20 % larger than the original design (kRowY's 48 px tall number,
 // 24 px stems). They grow like a balloon anchored at the floor and at the outer side: the number's bottom stays at
 // kRowY + 24, its left edge at kMargin, the figure's heads stay on the same floor and the right arrow stays put, so
