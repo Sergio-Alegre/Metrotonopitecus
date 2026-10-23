@@ -86,24 +86,27 @@ private:
         c.setTextColor(LIGHTGREY);
         c.drawString("www.sergioalegre.com", 4, 39);
 
+        // Credit for the advanced tuner logic (Font0 is 6 px per char: the scheme is dropped so the URL fits 240 px)
+        c.setTextColor(LIGHTGREY);
+        c.drawString("Logic for the advanced tuner mode", 4, 50);
+        c.drawString("created by tonemap.live:", 4, 60);
+        c.drawString("github.com/crossrhythm/tonemap.live", 4, 70);
+
         // Key reference: keys on the left, meaning at x = 62
         constexpr int kDesc = 62;
-        c.setTextColor(YELLOW);
-        c.drawString("Keys", 4, 58);
-
         c.setTextColor(WHITE);
         const Arrow arrows[] = {Arrow::Up, Arrow::Down, Arrow::Left, Arrow::Right};
-        for (int i = 0; i < 4; ++i) drawArrow(c, 9 + 13 * i, 74, arrows[i], WHITE);
-        c.drawString("(no Fn needed)", kDesc, 70);
+        for (int i = 0; i < 4; ++i) drawArrow(c, 9 + 13 * i, 87, arrows[i], WHITE);
+        c.drawString("(no Fn needed)", kDesc, 83);
 
-        c.drawString("-   +", 4, 83);
-        c.drawString("volume down / up", kDesc, 83);
+        c.drawString("-   +", 4, 93);
+        c.drawString("volume down / up", kDesc, 93);
 
-        c.drawString("M T G A", 4, 96);
-        c.drawString("switch mode", kDesc, 96);
+        c.drawString("M T G A", 4, 103);
+        c.drawString("switch mode", kDesc, 103);
 
-        c.drawString("Space", 4, 109);
-        c.drawString("start / stop", kDesc, 109);
+        c.drawString("Space", 4, 113);
+        c.drawString("start / stop", kDesc, 113);
         return true;
     }
 };
