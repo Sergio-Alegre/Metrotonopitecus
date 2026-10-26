@@ -22,11 +22,14 @@ instala a través de Launcher: WebUI (opción WUI de Launcher, subida desde el n
 - **Permiso permanente (Sergio, 2026-10-24):** si el Cardputer está conectado por USB (`pio device list` muestra
   el puerto), se flashea tras cada compilación correcta sin preguntar, usando el entorno normal `cardputer-adv`
   (no las variantes de diagnóstico salvo que se pidan). Si Sergio no quiere que se flashee algo, desconecta el
-  dispositivo. Sin puerto visible, no se intenta nada.
+  dispositivo. Sin puerto visible, no se intenta nada. El puerto se busca cada vez (ver "Comando").
 - Sin puerto serie visible (`pio device list` vacío) no se intenta nada: se deja `firmware.bin` listo para
   subirlo por WebUI y se avisa.
 - Flashear por USB sustituye a Launcher en ese slot; Sergio lo sabe y lo asume. Recuperar Launcher es cosa suya.
-- Comando: `pio run -t upload --upload-port <COM>` (en este equipo, `COM4`; confirmar con `pio device list`).
+- Comando: `pio run -t upload --upload-port <COM>`. **El número de COM no es fijo**: cambia según el puerto USB
+  del ordenador y según el ordenador. Se detecta siempre con `pio device list` antes de flashear: es el puerto de
+  "USB Serial Device" (los "Standard Serial over Bluetooth link" no son el Cardputer). No dar ningún COM por supuesto
+  ni escribirlo en ficheros del repo.
   No hace falta pulsar nada en el dispositivo: esptool lo pone en modo descarga por USB nativo y lo reinicia
   al terminar. La pantalla se queda en negro unos segundos y luego arranca la app; es normal, no es un fallo.
 - Tras flashear, avisar a Sergio de qué debe comprobar en pantalla/oído; Claude no puede verlo.
