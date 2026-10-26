@@ -84,10 +84,18 @@ constexpr Rgb kExtremeLow = {0, 0, 255};
 constexpr float kExtremeMinDisplay = 0.75f;
 
 // ---- Frequency -> note (pure functions) -------------------------------------------------
-// The single place a temperament would plug in.
-float latticeOffsetCents(int concertMidi);               // 0 in v1
-float targetOffsetCents(int concertMidi, float a4);      // lattice + 1200*log2(a4/440)
-float targetHz(int concertMidi, float a4);               // 440*2^((m-69)/12) * 2^(off/1200)
+// The single place a temperament plugs in: a table of cents offsets from equal temperament per pitch class
+// (concert pitch, C = 0), applied on top of the A4 reference. Index 0 is always plain equal temperament.
+constexpr int kTemperamentCount = 2;
+struct Temperament {
+    const char* name;      // shown in the message and the options overlay
+    int8_t cents[12];      // offset of each pitch class from equal temperament, C..B
+};
+extern const Temperament kTemperaments[kTemperamentCount];
+// All functions below take the temperament index (default 0 = equal; out-of-range gives equal).
+float latticeOffsetCents(int concertMidi, int temperament = 0);
+float targetOffsetCents(int concertMidi, float a4, int temperament = 0);  // lattice + 1200*log2(a4/440)
+float targetHz(int concertMidi, float a4, int temperament = 0);          // 440*2^((m-69)/12) * 2^(off/1200)
 
 struct NoteHit {
     int concertMidi;  // -1 when hz is not a usable frequency or no candidate lies in 0..127
@@ -97,7 +105,7 @@ struct NoteHit {
 };
 // +-2 candidates around round(12*log2(hz/a4))+69, minimising |(pos-cand)*100 - lattice(cand)|,
 // ties to the lower note. NaN / inf / <= 0 Hz give concertMidi == -1.
-NoteHit freqToNote(float hz, float a4);
+NoteHit freqToNote(float hz, float a4, int temperament = 0);
 
 float needlePct(float cents);   // (clamp(c,-50,50)+50)/100; 0 = flat edge of the cell
 // Signed tendency t in [-1, +1] (+ = sharp / high) from ToneMap's bias*() formulas: 0 while
@@ -185,6 +193,9 @@ public:
     void setHold(int idx, uint32_t nowMs);
     // Palette (0 Safe, 1 Extreme; clamped). Only changes how colours are computed: no timers, no data.
     void setPalette(int idx);
+    // Temperament (index into kTemperaments; clamped). The stored errors are relative to the old targets, so a real
+    // change clears the whole map (and ends the active note). Same index: nothing happens.
+    void setTemperament(int idx, uint32_t nowMs);
 
     // One analysis frame. `valid` = the caller's gates passed (clarity, level, 14 < hz < 8200).
     // An invalid frame, or a non-finite / <= 0 hz, ends the active note. dtMs = time since the
@@ -208,6 +219,7 @@ public:
     int historyIdx() const { return histIdx_; }
     int holdIdx() const { return holdIdx_; }
     int palette() const { return palette_; }
+    int temperament() const { return temper_; }
     float refA() const { return a4_; }
     int transposition() const { return transp_; }
     int activeConcertMidi() const { return activeMidi_; }
@@ -224,6 +236,7 @@ private:
     uint8_t histIdx_ = 1;
     uint8_t holdIdx_ = 2;
     uint8_t palette_ = 0;
+    uint8_t temper_ = 0;
     int8_t transp_ = 0;
     float a4_ = 440.0f;
     int activeMidi_ = -1;       // concert midi of the note of the previous valid frame

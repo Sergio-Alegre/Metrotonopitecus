@@ -20,6 +20,7 @@ struct Settings {
     int tmFlats = 0;         // 0 sharps, 1 flats
     int tmLed = 1;           // in-tune LED on/off
     int tmPalette = 0;       // heat-map colours: 0 safe (blue-white-orange), 1 extreme (green-yellow-red / cyan-blue)
+    int tmTemper = 0;        // ToneMap view tuning: 0 equal, 1 Ligeti Hora lunga (tonemap::kTemperaments)
 };
 
 namespace settings {
@@ -30,6 +31,7 @@ constexpr int kMaxBpm = 300;
 constexpr int kMaxBeats = 6;
 constexpr int kMinNote = 48;  // C3
 constexpr int kMaxNote = 83;  // B5
+constexpr int kTemperCount = 2;  // must equal tonemap::kTemperamentCount (checked in tonemap_view.cpp)
 constexpr float kMinRefA = 400.0f;
 constexpr float kMaxRefA = 480.0f;
 

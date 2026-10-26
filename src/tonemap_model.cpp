@@ -72,19 +72,30 @@ inline uint8_t toByte(float v) {
 // ---------------------------------------------------------------------------------------
 // Pure functions
 // ---------------------------------------------------------------------------------------
-float latticeOffsetCents(int /*concertMidi*/) { return 0.0f; }
+// Ligeti, Sonata for solo viola, 1st movement "Hora lunga" (1994): the score's footnote marks three notes with
+// downward arrows (-49, -31 and -14 cents) that imitate the harmonic series of an imaginary F string: the 11th
+// harmonic (B), the 7th (Eb) and the 5th (A). Every other note is in normal (equal) intonation.
+const Temperament kTemperaments[kTemperamentCount] = {
+    {"Equal", {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+    {"Ligeti Hora lunga", {0, 0, 0, -31, 0, 0, 0, 0, 0, -14, 0, -49}},
+};
 
-float targetOffsetCents(int concertMidi, float a4) {
+float latticeOffsetCents(int concertMidi, int temperament) {
+    if (temperament <= 0 || temperament >= kTemperamentCount) return 0.0f;
+    return (float)kTemperaments[temperament].cents[((concertMidi % 12) + 12) % 12];
+}
+
+float targetOffsetCents(int concertMidi, float a4, int temperament) {
     // getTargetOffsetCents = getLatticeOffsetCents + getA4OffsetCents
-    return latticeOffsetCents(concertMidi) + 1200.0f * log2f(a4 / 440.0f);
+    return latticeOffsetCents(concertMidi, temperament) + 1200.0f * log2f(a4 / 440.0f);
 }
 
-float targetHz(int concertMidi, float a4) {
+float targetHz(int concertMidi, float a4, int temperament) {
     const float equalTemp = 440.0f * exp2f((float)(concertMidi - 69) / 12.0f);
-    return equalTemp * exp2f(targetOffsetCents(concertMidi, a4) / 1200.0f);
+    return equalTemp * exp2f(targetOffsetCents(concertMidi, a4, temperament) / 1200.0f);
 }
 
-NoteHit freqToNote(float hz, float a4) {
+NoteHit freqToNote(float hz, float a4, int temperament) {
     NoteHit h = {-1, 0.0f, 0.0f, 0.0f};
     if (!finitef(hz) || !(hz > 0.0f) || !finitef(a4) || !(a4 > 0.0f)) return h;
 
@@ -96,7 +107,7 @@ NoteHit freqToNote(float hz, float a4) {
     int best = -1;
     for (int cand = mid - 2; cand <= mid + 2; ++cand) {
         if (cand < 0 || cand > 127) continue;
-        const float dev = fabsf((latticePos - (float)cand) * 100.0f - latticeOffsetCents(cand));
+        const float dev = fabsf((latticePos - (float)cand) * 100.0f - latticeOffsetCents(cand, temperament));
         if (dev < bestDev) {  // strict: ties stay with the lower note
             bestDev = dev;
             best = cand;
@@ -104,7 +115,7 @@ NoteHit freqToNote(float hz, float a4) {
     }
     if (best < 0) return h;
 
-    const float t = targetHz(best, a4);
+    const float t = targetHz(best, a4, temperament);
     h.concertMidi = best;
     h.targetHz = t;
     h.cents = 1200.0f * log2f(hz / t);
@@ -255,6 +266,14 @@ void Model::setPalette(int idx) {
     if (idx < 0) idx = 0;
     if (idx > kPaletteCount - 1) idx = kPaletteCount - 1;
     palette_ = (uint8_t)idx;  // colours are computed on demand: nothing to materialise or restart
+}
+
+void Model::setTemperament(int idx, uint32_t nowMs) {
+    if (idx < 0) idx = 0;
+    if (idx > kTemperamentCount - 1) idx = kTemperamentCount - 1;
+    if (idx == (int)temper_) return;
+    temper_ = (uint8_t)idx;
+    reset(nowMs);
 }
 
 void Model::endNote() {
@@ -424,7 +443,7 @@ TickResult Model::tick(bool valid, float hz, uint32_t dtMs, uint32_t nowMs) {
 
     NoteHit hit = {-1, 0.0f, 0.0f, 0.0f};
     if (valid) {
-        hit = freqToNote(hz, a4_);
+        hit = freqToNote(hz, a4_, temper_);
         if (hit.concertMidi >= 0 && !(fabsf(hit.cents) <= kMaxAcceptCents)) hit.concertMidi = -1;
     }
     if (hit.concertMidi < 0) {

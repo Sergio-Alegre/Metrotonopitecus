@@ -221,13 +221,13 @@ C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escri
 | `Alt` o `Enter` | Abre / cierra el **panel de opciones** (ver abajo) |
 | `R` | Borrar el mapa (todas las celdas) |
 | `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
-| Izquierda / Derecha | Sin uso en la v1 (reservadas para temperamentos en el futuro) |
+| Izquierda / Derecha | **Afinación** (temperamento): Equal ↔ Ligeti Hora lunga (ver "Temperamentos"). Cambiarla **borra el mapa** |
 
 **Panel de opciones** (`Alt` o `Enter`, alterna): superposición opaca a pantalla completa (240 × 125, Font0, 13 líneas de
 9 px) con el título `OPTIONS` y `Alt/Enter: close`, y una línea por tecla con su **valor actual**: `S Sensitivity`,
 `H History`, `C Color hold`, `N Noise gate`, `K Transpose`, `F Accidentals`, `P Palette`, `L LED` (con los mismos textos
 que los mensajes transitorios) y, sin valor, `R Clear map`, `Space Pause` / `Space Resume` (según el estado),
-`Up/Down  A=442 (reference)` y `T Classic view`. Mientras está abierto, las teclas del mapa siguen funcionando y los valores
+`Up/Down  A=442 (reference)` y `T Classic view` (esta última comparte línea con `R Clear map`), más `</> Tuning` con la afinación actual. Mientras está abierto, las teclas del mapa siguen funcionando y los valores
 se actualizan al instante; la captura, el análisis, el LED y el modelo siguen corriendo debajo, y al cerrar se redibuja el
 mapa entero. Solo se redibuja al pulsar una tecla (sin coste por fotograma). Siempre está cerrado al entrar en la vista;
 `T`, `M`, `G`, `A` funcionan como siempre y lo cierran al salir. `Alt` solo lo recibe la vista ToneMap (`main.cpp` no se lo
@@ -258,7 +258,26 @@ El nivel `Min` (30) está pensado para tocar con sordina (ver `TONEMAP_DESIGN.md
 | Alteraciones | sharps / flats | sharps | `tmFlats` |
 | LED de afinado | on / off | on | `tmLed` |
 | Paleta | safe / extreme | safe | `tmPal` (0 = Safe, 1 = Extreme) |
+| Afinación (temperamento) | equal (0) / Ligeti Hora lunga (1) | equal | `tmTemper` |
 | La de referencia | 400–480 Hz | 442 (ya existe) | `refA` (ya existe) |
+
+#### Temperamentos (afinación)
+
+Solo en la vista ToneMap (el afinador clásico sigue siempre en temperamento igual). Un temperamento es una tabla de 12
+offsets en cents respecto al temperamento igual, por clase de nota de **concierto** (Do = 0, todas las octavas), aplicada
+encima de la La de referencia (`tonemap::kTemperaments`, `latticeOffsetCents`). El "centro" de cada celda (línea negra de
+referencia) y la aguja pasan a medirse contra la nota ya desplazada, y la búsqueda de la nota más próxima también.
+Las notas desplazadas llevan una **flecha pequeña hacia abajo** en su etiqueta (4, 6 u 8 px según el desplazamiento:
+< 20, < 40, ≥ 40 cents). Cambiar de temperamento borra el mapa (los errores guardados eran contra otros objetivos).
+
+- **Equal**: todo a 0.
+- **Ligeti Hora lunga**: Sonata para viola sola (1994), 1.er movimiento. Nota al pie de la partitura: tres flechas hacia abajo
+  imitan la serie armónica de un Fa imaginario (la cuerda de Do sirve de modelo): **Si −49** (armónico 11), **Mi♭ −31**
+  (armónico 7) y **La −14** (armónico 5, la diferencia entre la tercera mayor justa y la templada). Las demás notas, afinación
+  normal. No es una escala histórica con nombre propio (búsqueda hecha): es un esquema de este movimiento. Valores = los de la
+  partitura (los teóricos son −48,7 / −31,2 / −13,7).
+
+Pendiente: más temperamentos y uno definido por el usuario (tabla de 12 offsets editable); el centro tonal queda fijo.
 
 Los valores de transposición son los de ToneMap (semitonos; nota escrita = nota de concierto − valor, ver §3.2).
 Añadir A (clarinete en La, −3) es trivial si Sergio lo pide más adelante.
@@ -291,7 +310,7 @@ Añadir A (clarinete en La, −3) es trivial si Sergio lo pide más adelante.
 
 #### Fuera de alcance en la v1
 
-Temperamentos y centro tonal, stretch Railsback, Note View (Ribbons/Balloons), grabador y WAV, editor de paleta,
+Más temperamentos (hay Equal y Ligeti Hora lunga, ver arriba) y centro tonal, stretch Railsback, Note View (Ribbons/Balloons), grabador y WAV, editor de paleta,
 AGC, estadísticas, guardar el mapa en SD, cambiar el rango visible. La arquitectura no debe impedir añadir
 temperamentos después (columnas de ancho variable): la conversión frecuencia → nota debe pasar por una única
 función "offset de destino por nota", como en ToneMap.

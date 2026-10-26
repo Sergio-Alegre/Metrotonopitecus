@@ -27,6 +27,7 @@ void clampAll(Settings& s) {
     s.tmFlats = constrain(s.tmFlats, 0, 1);
     s.tmLed = constrain(s.tmLed, 0, 1);
     s.tmPalette = constrain(s.tmPalette, 0, 1);
+    s.tmTemper = constrain(s.tmTemper, 0, settings::kTemperCount - 1);
 }
 
 }  // namespace
@@ -72,13 +73,14 @@ void load() {
     current.tmFlats = prefs.getInt("tmFlats", current.tmFlats);
     current.tmLed = prefs.getInt("tmLed", current.tmLed);
     current.tmPalette = prefs.getInt("tmPal", current.tmPalette);
+    current.tmTemper = prefs.getInt("tmTemper", current.tmTemper);
     prefs.end();
     clampAll(current);
     Serial.printf("[settings] loaded: vol=%d bpm=%d subdiv=%d beats=%d note=%d refA=%.1f\n", current.volume,
                   current.bpm, current.subdivision, current.beats, current.targetNote, current.refA);
-    Serial.printf("[settings] tuner: view=%d sens=%d hist=%d hold=%d gate=%d transp=%d flats=%d led=%d pal=%d\n",
+    Serial.printf("[settings] tuner: view=%d sens=%d hist=%d hold=%d gate=%d transp=%d flats=%d led=%d pal=%d temper=%d\n",
                   current.tunerView, current.tmSens, current.tmHist, current.tmHold, current.tmGate, current.tmTransp,
-                  current.tmFlats, current.tmLed, current.tmPalette);
+                  current.tmFlats, current.tmLed, current.tmPalette, current.tmTemper);
 }
 
 void touch() {
@@ -109,6 +111,7 @@ void tick() {
     prefs.putInt("tmFlats", current.tmFlats);
     prefs.putInt("tmLed", current.tmLed);
     prefs.putInt("tmPal", current.tmPalette);
+    prefs.putInt("tmTemper", current.tmTemper);
     prefs.end();
     Serial.println("[settings] saved");
 }

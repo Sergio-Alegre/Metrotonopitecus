@@ -89,6 +89,8 @@ const char* const kHoldNames[6] = {"5 s", "15 s", "30 s", "2 min", "5 min", "No 
 const char* const kTranspNames[4] = {"C", "Bb", "Eb", "F"};
 const char* const kPaletteNames[2] = {"Safe", "Extreme"};
 
+static_assert(settings::kTemperCount == kTemperamentCount, "settings::kTemperCount out of sync with the model");
+
 // ---- state -------------------------------------------------------------------------------
 // The heat map: ~38 KB in .bss (Model has an empty constructor), never on the stack. It lives as
 // long as the firmware runs, so it survives mode and view switches.
@@ -241,6 +243,7 @@ void syncModel(uint32_t now) {
     if (model.palette() != s.tmPalette) model.setPalette(s.tmPalette);  // colours only: no timers
     if (fabsf(model.refA() - s.refA) > 1e-4f) model.setRefA(s.refA, now);
     if (model.transposition() != s.tmTransp) model.setTransposition(s.tmTransp, now);
+    if (model.temperament() != s.tmTemper) model.setTemperament(s.tmTemper, now);  // clears the map
 }
 
 int transpIndex(int semis) {
@@ -418,8 +421,21 @@ void drawCell(M5Canvas& c, int row, int col, uint32_t now, bool flats) {
     // Active cell (the note sounding now): white. Other visited cells: black or light grey by the luminance of
     // the colour shown (the near-white centre of the Safe palette needs black text). Never visited: dim grey on black.
     const bool active = hasNote && writtenMidi == midi;
-    c.setTextColor(active ? kColWhite : (!visited ? kColLabelOff : (useBlackLabel(rgb) ? kColBlack : kColLabelLight)));
+    const uint16_t labelCol =
+        active ? kColWhite : (!visited ? kColLabelOff : (useBlackLabel(rgb) ? kColBlack : kColLabelLight));
+    c.setTextColor(labelCol);
     c.drawString(label, x + 2, y + 2);
+
+    // Notes the temperament lowers carry a small down arrow (like the score's): 4, 6 or 8 px tall for small,
+    // medium and large offsets. The cell's centre line is the lowered target, so the needle reads against it.
+    const float off = latticeOffsetCents(midi + model.transposition(), model.temperament());
+    if (off < -0.5f) {
+        const int h = off <= -40.0f ? 8 : (off <= -20.0f ? 6 : 4);
+        const int ax = x + 16;
+        c.drawFastVLine(ax, y + 2, h, labelCol);
+        c.drawLine(ax - 2, y + 2 + h - 3, ax, y + 2 + h - 1, labelCol);
+        c.drawLine(ax + 2, y + 2 + h - 3, ax, y + 2 + h - 1, labelCol);
+    }
 }
 
 // The active cell (the only place with white in the grid, besides its label): a white bar along the bottom of
@@ -584,12 +600,16 @@ void drawMenu(M5Canvas& c) {
     drawMenuRow(c, 6, "F", "Accidentals", s.tmFlats ? "flats" : "sharps");
     drawMenuRow(c, 7, "P", "Palette", kPaletteNames[clampi(s.tmPalette, 0, 1)]);
     drawMenuRow(c, 8, "L", "LED", s.tmLed ? "on" : "off");
-    drawMenuRow(c, 9, "R", "Clear map", nullptr);
-    drawMenuRow(c, 10, "Space", paused ? "Resume" : "Pause", nullptr);
+    drawMenuRow(c, 9, "</>", "Tuning", kTemperaments[clampi(s.tmTemper, 0, kTemperamentCount - 1)].name);
+    drawMenuRow(c, 10, "R", "Clear map", nullptr);
+    c.setTextColor(kColRefA);
+    c.drawString("T", 124, 2 + 10 * kMenuPitch);
+    c.setTextColor(kColGrey);
+    c.drawString("Classic view", 136, 2 + 10 * kMenuPitch);
+    drawMenuRow(c, 11, "Space", paused ? "Resume" : "Pause", nullptr);
     char ref[32];
     snprintf(ref, sizeof(ref), " A=%.0f (reference)", (double)s.refA);
-    drawMenuRow(c, 11, "Up/Down", ref, nullptr);
-    drawMenuRow(c, 12, "T", "Classic view", nullptr);
+    drawMenuRow(c, 12, "Up/Down", ref, nullptr);
 }
 
 }  // namespace
@@ -674,6 +694,19 @@ void onKey(const KeyEvent& e) {
             }
             break;
         }
+        case Key::Left:
+        case Key::Right: {
+            // Tuning: the targets change, so the model clears the map (and ends the active note).
+            const int n = kTemperamentCount;
+            s.tmTemper = (clampi(s.tmTemper, 0, n - 1) + (e.key == Key::Right ? 1 : n - 1)) % n;
+            model.setTemperament(s.tmTemper, now);
+            hasNote = false;
+            noteInZone = false;
+            settings::touch();
+            showMessage("Tuning: %s", kTemperaments[s.tmTemper].name);
+            Serial.printf("[tonemap] tuning: %s (map cleared)\n", kTemperaments[s.tmTemper].name);
+            break;
+        }
         case Key::Space:
             setPaused(!paused);
             break;
@@ -749,7 +782,7 @@ void onKey(const KeyEvent& e) {
             }
             break;
         default:
-            break;  // Left / Right / Del: unused in v1
+            break;  // Del: unused
     }
     dirty = true;
 }

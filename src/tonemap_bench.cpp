@@ -383,6 +383,7 @@ void fresh(Sensitivity s, int hist, int hold, float a4 = 440.0f, int transp = 0)
     gModel.setRefA(a4, gNow);
     gModel.setTransposition(transp, gNow);
     gModel.setPalette(0);  // reset() keeps the palette: tests start in Safe
+    gModel.setTemperament(0, gNow);  // ... and the temperament: tests start in equal temperament
 }
 
 bool rgbNear(const Rgb& c, int r, int g, int b, int tol) {
@@ -1368,6 +1369,57 @@ void testRobustness() {
     s.done("0/NaN/+-inf/negative/denormal/huge Hz with valid and invalid, dt=0, dt max, bad indices, reset");
 }
 
+// ---- temperament -----------------------------------------------------------------------------
+// Ligeti Hora lunga (index 1): B -49, Eb -31, A -14 cents from equal temperament, every other note 0.
+void testTemperament() {
+    Series s("temperament");
+    const float a4 = 440.0f;
+    // The offsets themselves, in every octave; equal temperament (and a bad index) is all zeros.
+    const int pcs[12] = {0, 0, 0, -31, 0, 0, 0, 0, 0, -14, 0, -49};
+    bool offsOk = true;
+    for (int m = 0; m < kNoteCount; ++m) {
+        if (latticeOffsetCents(m, 1) != (float)pcs[m % 12] || latticeOffsetCents(m, 0) != 0.0f || latticeOffsetCents(m, 7) != 0.0f ||
+            latticeOffsetCents(m) != 0.0f)
+            offsOk = false;
+    }
+    s.check(offsOk, "lattice offsets per pitch class, all octaves");
+    // Each altered note, played exactly on its lowered target, is found as that note at 0 cents; in equal
+    // temperament the same frequency is the same note that many cents flat.
+    const int mids[3] = {71, 75, 69};  // B4, Eb5, A4
+    const float offs[3] = {-49.0f, -31.0f, -14.0f};
+    for (int i = 0; i < 3; ++i) {
+        const float hz = 440.0f * exp2f((float)(mids[i] - 69) / 12.0f + offs[i] / 1200.0f);
+        const NoteHit lig = freqToNote(hz, a4, 1);
+        s.check(lig.concertMidi == mids[i] && fabsf(lig.cents) < 0.01f, "note %d lowered %g c: midi %d, %.3f c (Ligeti)", mids[i], (double)offs[i],
+                lig.concertMidi, (double)lig.cents);
+        const NoteHit eq = freqToNote(hz, a4, 0);
+        s.check(eq.concertMidi == mids[i] && fabsf(eq.cents - offs[i]) < 0.01f, "note %d lowered %g c: %.3f c (equal)", mids[i], (double)offs[i],
+                (double)eq.cents);
+    }
+    // 49 c flat of B is still B (not Bb) with Ligeti, and an unaltered note (E4) is untouched; a4 shifts every target.
+    const float bFlat = 440.0f * exp2f(2.0f / 12.0f + (-49.0f - 20.0f) / 1200.0f);
+    const NoteHit h1 = freqToNote(bFlat, a4, 1);
+    s.check(h1.concertMidi == 71 && fabsf(h1.cents + 20.0f) < 0.01f, "B4 -69 c from equal = -20 c from the Ligeti target (midi %d, %.3f c)", h1.concertMidi, (double)h1.cents);
+    const NoteHit h2 = freqToNote(440.0f * exp2f(-5.0f / 12.0f), a4, 1);
+    s.check(h2.concertMidi == 64 && fabsf(h2.cents) < 0.01f, "E4 unaltered (midi %d, %.3f c)", h2.concertMidi, (double)h2.cents);
+    const NoteHit h3 = freqToNote(442.0f * exp2f(-14.0f / 1200.0f), 442.0f, 1);
+    s.check(h3.concertMidi == 69 && fabsf(h3.cents) < 0.01f, "A4 with A=442 (midi %d, %.3f c)", h3.concertMidi, (double)h3.cents);
+    s.check(fabsf(targetHz(71, a4, 1) - targetHz(71, a4, 0) * exp2f(-49.0f / 1200.0f)) < 0.001f, "targetHz applies the offset");
+    // The model: changing the temperament clears the map; the same index does nothing.
+    fresh(Sensitivity::Medium, 1, 5);
+    feedNote(71, 0.0, 100, 20);
+    s.check(gModel.totalMs(71) > 0, "note fed");
+    gModel.setTemperament(0, gNow);
+    s.check(gModel.totalMs(71) > 0 && gModel.temperament() == 0, "same temperament keeps the map");
+    gModel.setTemperament(1, gNow);
+    s.check(gModel.temperament() == 1 && gModel.totalMs(71) == 0 && gModel.activeConcertMidi() == -1, "new temperament clears the map");
+    gModel.setTemperament(99, gNow);
+    s.check(gModel.temperament() == kTemperamentCount - 1, "index clamps");
+    gModel.setTemperament(-3, gNow);
+    s.check(gModel.temperament() == 0, "negative index clamps to equal");
+    s.done("Ligeti Hora lunga offsets B -49 / Eb -31 / A -14, nearest-note search, targetHz, map cleared on change");
+}
+
 // ---- budget --------------------------------------------------------------------------------
 void testBudget() {
     Series s("budget");
@@ -1492,6 +1544,7 @@ void runModelTests() {
     testChunks();
     testFirstFrame();
     testRobustness();
+    testTemperament();
     fresh(Sensitivity::Medium, 1, 2);  // leave the model clean
     gModel.reset(gNow);
     rep("[test] SUMMARY: %s | FAILURES=%d", gFailures == 0 ? "ALL PASS" : "FAILED", gFailures);
