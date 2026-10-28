@@ -49,4 +49,4 @@ Next on the roadmap is to also adopt the different temperaments, that could be v
 
 ## License
 
-Metrotonopitecus is released under the [MIT License](LICENSE). The Tonemap view and the pitch detector are ported from [Tonemap](https://tonemap.live) and pitchy, which have their own licenses: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT License](LICENSE). Third-party licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
