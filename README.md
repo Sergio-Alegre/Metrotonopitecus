@@ -23,7 +23,7 @@ For now the metronome I would say that it will stay like this, let's see after a
 
 ## The Tuner
 
-At first I was just building a classical tuner with a drone function, since it was all I have used and known. But in the middle of the process, I had a viola lesson where my teacher showed me the Tunemap app, just to prove his point about my "creative" intonation. And it was just too good to be ignored. Of course the screen of the Cardputer ADV is a bit too small, but I will try to build the second screen mod and anyway on the next step of the road map, building my own metronomes with separate components, the screen won't be an issue anymore. Anyway, give it a try, because after the second use, you just get used to reading the colours to see your tendencies, and because the cells are always starting from C, you will know where you are. It is a very tough exercise to practice a slow scale and see the screen becoming a Christmas tree with all the lights in different colours on. But a very good exercise I would say.
+At first I was just building a classical tuner with a drone function, since it was all I have used and known. But in the middle of the process, I had a viola lesson where my teacher showed me the [Tonemap](https://tonemap.live) app, just to prove his point about my "creative" intonation. And it was just too good to be ignored. Of course the screen of the Cardputer ADV is a bit too small, but I will try to build the second screen mod and anyway on the next step of the road map, building my own metronomes with separate components, the screen won't be an issue anymore. Anyway, give it a try, because after the second use, you just get used to reading the colours to see your tendencies, and because the cells are always starting from C, you will know where you are. It is a very tough exercise to practice a slow scale and see the screen becoming a Christmas tree with all the lights in different colours on. But a very good exercise I would say.
 
 
 ---
@@ -41,6 +41,6 @@ Have fun!
 
 Many thanks to the folks of https://tonemap.live for sharing their code on GitHub https://github.com/crossrhythm/tonemap.live that allowed me to incorporate their incredible function into my design. You will find it by pressing the Tuner key (T) twice.
 
-It is the same logic as the original Tone Map, but translated for the microcontroller, since the original code is written in HTML. For now all the basic options + transposing notes + a second palette of colours (a bit more radical and not made for colour-blind people) are included.
+It is the same logic as the original [Tonemap](https://tonemap.live), but translated for the microcontroller, since the original code is written in HTML. For now all the basic options + transposing notes + a second palette of colours (a bit more radical and not made for colour-blind people) are included.
 
 Next on the roadmap is to also adopt the different temperaments, that could be very useful for baroque and curious people.
