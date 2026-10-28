@@ -8,7 +8,7 @@ Idioma de trabajo: español (código y comentarios en inglés).
 - Dispositivo: M5Stack **Cardputer ADV** (ESP32-S3). No es intercambiable con el Cardputer original:
   si algo de teclado/pantalla/audio falla, comprobar primero las diferencias ADV.
 - El dispositivo tiene **M5Launcher** instalado (v2.8+ para ADV). Es el gestor de arranque.
-- Desarrollo en Windows con PlatformIO (CLI) + Git. Repo en GitHub (privado).
+- Desarrollo en Windows con PlatformIO (CLI) + Git. Repo en GitHub (público).
 
 ## Regla crítica de despliegue
 

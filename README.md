@@ -6,7 +6,7 @@ Welcome to my first project for the Cardputer ADV. It is also a development of t
 
 ## Hardware
 
-Right now, this is firmware for the Cardputer ADV, which you can buy. You can either compile it from this repository, or just download the firmware binary. Later on, I will publish it on the M5Launcher, so you can download it directly from there, but that is still in progress.
+Right now, this is firmware for the Cardputer ADV, which you can buy. You can either compile it from this repository, or just [download the firmware binary](https://github.com/Sergio-Alegre/Metrotonopitecus/releases/latest). Later on, I will publish it on the M5Launcher, so you can download it directly from there, but that is still in progress.
 
 The idea is that I will create a target option that can use any ESP32-S3 microcontroller with your own buttons and your own screen. But right now, just buy a Cardputer ADV and flash it.
 
