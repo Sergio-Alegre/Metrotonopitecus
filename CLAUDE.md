@@ -1,65 +1,42 @@
 # Metrotonopitecus
 
-Metrónomo + afinador para el M5Stack Cardputer ADV. Primer proyecto de Sergio para Cardputer.
-Idioma de trabajo: español (código y comentarios en inglés).
+Metronome + tuner for the M5Stack Cardputer ADV. Sergio's first Cardputer project.
+Working language with Sergio: Spanish. Code and comments: English.
 
-## Hardware y entorno
+## Hardware and environment
 
-- Dispositivo: M5Stack **Cardputer ADV** (ESP32-S3). No es intercambiable con el Cardputer original:
-  si algo de teclado/pantalla/audio falla, comprobar primero las diferencias ADV.
-- El dispositivo tiene **M5Launcher** instalado (v2.8+ para ADV). Es el gestor de arranque.
-- Desarrollo en Windows con PlatformIO (CLI) + Git. Repo en GitHub (público).
+- Device: M5Stack **Cardputer ADV** (ESP32-S3). Not interchangeable with the original Cardputer: if keyboard/screen/audio fails, check the ADV differences first.
+- The device runs **M5Launcher** (v2.8+ for ADV) as boot manager.
+- Development on Windows with PlatformIO (CLI) + Git. GitHub repo is public.
 
-## Regla crítica de despliegue
+## Critical deployment rule
 
-**Por defecto, Claude no flashea por USB** (esptool/`pio run -t upload`): pisaría M5Launcher.
-Se compila el binario de **aplicación** (`.pio/build/<env>/firmware.bin`, NO el "merged") y Sergio lo
-instala a través de Launcher: WebUI (opción WUI de Launcher, subida desde el navegador), tarjeta SD u OTA.
+**By default Claude does not flash over USB** (esptool / `pio run -t upload`): it would overwrite M5Launcher. Build the **application** binary (`.pio/build/<env>/firmware.bin`, NOT the "merged" one); Sergio installs it through Launcher: WebUI (Launcher's WUI option, upload from browser), SD card or OTA.
 
-**Flasheo por USB, solo con permiso de Sergio.** Claude flashea por USB únicamente cuando Sergio lo pide:
-- Una orden puntual ("flashea", "súbelo", "dame firmware nuevo" con el Cardputer conectado por USB) vale
-  para ese firmware. Si pide firmware nuevo y el dispositivo está conectado, se entiende que se flashea.
-- **Permiso permanente (Sergio, 2026-10-24):** si el Cardputer está conectado por USB (`pio device list` muestra
-  el puerto), se flashea tras cada compilación correcta sin preguntar, usando el entorno normal `cardputer-adv`
-  (no las variantes de diagnóstico salvo que se pidan). Si Sergio no quiere que se flashee algo, desconecta el
-  dispositivo. Sin puerto visible, no se intenta nada. El puerto se busca cada vez (ver "Comando").
-- Sin puerto serie visible (`pio device list` vacío) no se intenta nada: se deja `firmware.bin` listo para
-  subirlo por WebUI y se avisa.
-- Flashear por USB sustituye a Launcher en ese slot; Sergio lo sabe y lo asume. Recuperar Launcher es cosa suya.
-- Comando: `pio run -t upload --upload-port <COM>`. **El número de COM no es fijo**: cambia según el puerto USB
-  del ordenador y según el ordenador. Se detecta siempre con `pio device list` antes de flashear: es el puerto de
-  "USB Serial Device" (los "Standard Serial over Bluetooth link" no son el Cardputer). No dar ningún COM por supuesto
-  ni escribirlo en ficheros del repo.
-  No hace falta pulsar nada en el dispositivo: esptool lo pone en modo descarga por USB nativo y lo reinicia
-  al terminar. La pantalla se queda en negro unos segundos y luego arranca la app; es normal, no es un fallo.
-- Tras flashear, avisar a Sergio de qué debe comprobar en pantalla/oído; Claude no puede verlo.
+**USB flashing only with Sergio's permission.**
+- A one-off order ("flash it", "upload it", "give me new firmware" with the Cardputer on USB) covers that firmware. New firmware requested with the device connected means flash.
+- **Standing permission (Sergio, 2026-10-24):** if the Cardputer is on USB (`pio device list` shows the port), flash after every successful build without asking, using the normal `cardputer-adv` env (not the diagnostic variants unless asked). If Sergio does not want a flash, he unplugs the device. No visible port: do nothing.
+- No serial port visible (`pio device list` empty): do not try anything; leave `firmware.bin` ready for WebUI upload and say so.
+- USB flashing replaces Launcher in that slot. Sergio knows and accepts it; restoring Launcher is his job.
+- Command: `pio run -t upload --upload-port <COM>`. **The COM number is not fixed**: it changes with the USB port and the computer. Always detect it with `pio device list` before flashing: it is the "USB Serial Device" port ("Standard Serial over Bluetooth link" ports are not the Cardputer). Never assume a COM or write one into repo files. No button press needed: esptool puts the device in download mode over native USB and resets it at the end. The screen stays black a few seconds, then the app starts; normal, not a failure.
+- After flashing, tell Sergio what to check on screen/by ear; Claude cannot see or hear it.
 
-## Comandos
+## Commands
 
-- Compilar: `pio run`
-- Monitor serie (para depurar lo que Claude no puede oír/ver): `pio device monitor`
-- Desplegar: `pio run` y luego subir `firmware.bin` por la WebUI de Launcher (ver `docs/DEPLOY.md`
-  cuando exista; hasta entonces el primer despliegue es manual), o flashear por USB si Sergio lo pide
-  (ver la regla de arriba).
+- Build: `pio run`
+- Serial monitor (to debug what Claude cannot hear/see): `pio device monitor`
+- Deploy: `pio run`, then upload `firmware.bin` through Launcher's WebUI (see `docs/DEPLOY.md` when it exists; until then the first deploy is manual), or flash over USB if Sergio asks (rule above).
 
-## Convenciones
+## Conventions
 
-- Pasos pequeños, un commit por paso funcional. Compilar antes de cada commit.
-- **Claude hace siempre commit y push con cada compilación de firmware** (`pio run`, también los
-  entornos de diagnóstico): tras una compilación correcta, `git add` de los cambios, commit con mensaje
-  descriptivo y `git push`, sin esperar a que Sergio lo pida. Si la compilación falla no se commitea. Si el
-  push falla (red, autenticación), decirlo claramente y reintentar después; no dar nada por subido sin
-  haberlo comprobado.
-- No añadir dependencias sin decirlo. Fijar versiones de librerías en `platformio.ini`.
-- Claude no puede oír el altavoz ni ver la pantalla: lo que se pueda verificar, que salga por serie.
-- El diseño y los criterios de aceptación viven en `docs/SPEC.md`. Leerlo antes de trabajar.
+- Small steps, one commit per working step. Build before each commit.
+- **Claude always commits and pushes after every firmware build** (`pio run`, diagnostic envs included): after a successful build, `git add` the changes, commit with a descriptive message and `git push`, without waiting to be asked. Failed build: no commit. Failed push (network, auth): say so clearly and retry later; never report something as pushed without checking.
+- No new dependencies without saying so. Pin library versions in `platformio.ini`.
+- Claude cannot hear the speaker or see the screen: whatever can be verified should come out over serial.
+- Design and acceptance criteria live in `docs/SPEC.md`. Read it before working.
 
-## Interfaz del firmware
+## Firmware interface
 
-- **Todo el texto que muestra el firmware (pantalla y serie) va siempre en inglés**, aunque Sergio
-  describa la funcionalidad en español. Esto incluye etiquetas, mensajes, nombres de modos y logs.
-- **La interfaz es silenciosa**: sin pitidos al pulsar teclas ni sonidos en menús o juegos, para evitar
-  disparos accidentales en ensayos. Solo suena lo musical: clic del metrónomo y nota de referencia (drone).
-- Barra inferior fija de una línea de texto (con una línea de 1 px encima) para los modos; el resto
-  de la pantalla es del modo activo. Teclas globales: `M` metrónomo, `T` afinador, `G` juego, `A` extra;
-  `-`/`_` y `=`/`+` bajan/suben el volumen global (se aceptan ambas variantes para no necesitar Shift).
+- **All text shown by the firmware (screen and serial) is always English**, even if Sergio describes the feature in Spanish. Includes labels, messages, mode names and logs.
+- **The interface is silent**: no beeps on key presses, no sounds in menus or games, to avoid accidental triggers in rehearsals. Only musical sounds: metronome click and reference note (drone).
+- Fixed one-line bottom bar (1 px line above) for modes; the rest of the screen belongs to the active mode. Global keys: `M` metronome, `T` tuner, `G` game, `A` extra; `-`/`_` and `=`/`+` lower/raise global volume (both variants accepted so Shift is not needed).

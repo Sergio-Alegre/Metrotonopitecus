@@ -1,623 +1,311 @@
-# Implementation brief — vista ToneMap en el afinador
+# Implementation brief — ToneMap view in the tuner
 
-Fecha: 2026-10-16. Decidido con Sergio en conversación (tres rondas de preguntas).
-Referencia portada: [crossrhythm/tonemap.live](https://github.com/crossrhythm/tonemap.live), commit `bd19db1`,
-licencia MIT © 2025 Jeremy Black. Detector de referencia: `pitchy@4.0.1` (npm), MIT.
+Date: 2026-10-16. Decided with Sergio in conversation (three rounds of questions).
+Ported reference: [crossrhythm/tonemap.live](https://github.com/crossrhythm/tonemap.live), commit `bd19db1`, MIT © 2025 Jeremy Black. Reference detector: `pitchy@4.0.1` (npm), MIT.
 
-Este documento es para **Claude Code en el ordenador de Sergio**. Contiene la especificación cerrada (§2), la
-lógica de ToneMap ya extraída (§3), la adaptación al ESP32-S3 (§4), el plan por fases con el agente de cada
-fase y las paradas para probar en el dispositivo (§5), y los criterios de aceptación (§6).
+For **Claude Code on Sergio's computer**. Contains the closed spec (§2), the extracted ToneMap logic (§3), the ESP32-S3 adaptation (§4), the phase plan with agent per phase and device-test stops (§5), and acceptance criteria (§6).
 
 ---
 
-## 0. Cómo ejecutar este brief (instrucciones para Claude Code)
+## 0. How to run this brief (instructions for Claude Code)
 
-1. Lee `CLAUDE.md` y `docs/SPEC.md` antes de nada. Sus reglas mandan sobre este brief si chocan
-   (sobre todo: **no flashear por USB sin permiso**, commit + push tras cada compilación correcta, todo el texto
-   del firmware en inglés, interfaz silenciosa).
-2. Trabaja en la rama `feature/tonemap`, que ya existe en GitHub y contiene este brief
-   (`git fetch origin && git checkout feature/tonemap`). **No fusiones a `main` sin que Sergio lo diga.**
-3. Ejecuta las fases de §5 en orden. Cada fase indica qué agente lanzar, qué le pasas y qué debe devolver.
-   La sesión principal es el **orquestador**: lanza agentes, revisa lo que devuelven, compila, hace commit.
-4. En cada **PARADA** te detienes: compilas, dejas `firmware.bin` listo, dices a Sergio exactamente qué probar
-   y qué mirar en serie, y esperas su respuesta. Si Sergio pide flashear y el Cardputer está conectado,
-   flasheas según `CLAUDE.md`.
-5. **Alcance:** solo se toca lo necesario para la vista ToneMap: `mode_tuner.cpp`, ficheros nuevos, `settings.*`,
-   una línea de `main.cpp` y un método vacío en `ui.h` (§4.7). El metrónomo, el juego, About, `pitch.*` y
-   `audio.*` no se modifican (salvo que la fase 2 demuestre que es imprescindible; entonces se pregunta).
-6. Si algo de este brief resulta imposible o ambiguo en el código real, **pregunta a Sergio** en vez de decidir
-   un cambio de comportamiento por tu cuenta. Las decisiones técnicas internas (estructuras, nombres) son tuyas.
+1. Read `CLAUDE.md` and `docs/SPEC.md` first. Their rules win over this brief on conflict (above all: **no USB flashing without permission**, commit + push after every successful build, all firmware text in English, silent interface).
+2. Work on branch `feature/tonemap` (already on GitHub, contains this brief: `git fetch origin && git checkout feature/tonemap`). **Do not merge into `main` unless Sergio says so.**
+3. Run the phases of §5 in order. The main session is the **orchestrator**: launches agents, reviews results, builds, commits.
+4. At each **STOP**: build, leave `firmware.bin` ready, tell Sergio exactly what to test and what to watch on serial, wait for the answer. If Sergio asks to flash and the Cardputer is connected, flash per `CLAUDE.md`.
+5. **Scope:** touch only what the ToneMap view needs: `mode_tuner.cpp`, new files, `settings.*`, one line of `main.cpp` and an empty method in `ui.h` (§4.7). Metronome, game, About, `pitch.*` and `audio.*` stay untouched (unless phase 2 proves it essential; then ask).
+6. If anything in this brief proves impossible or ambiguous in the real code, **ask Sergio** instead of changing behavior on your own. Internal technical decisions (structures, names) are yours.
 
 ---
 
-## 1. Qué se construye
+## 1. What is built
 
-Una segunda vista dentro del afinador (`T`), inspirada en tonemap.live: una cuadrícula de 12 columnas (notas) ×
-6 filas (octavas C2–B7) donde cada nota que tocas tiñe su celda según tu **tendencia** de afinación acumulada
-(naranja = tiendes a alto, verde = centrado, azul = tiendes a bajo). La celda que suena lleva borde blanco y una
-aguja de cents. Es un mapa de calor de intonación para practicar, no un afinador de nota objetivo.
+A second view inside the tuner (`T`), inspired by tonemap.live: a grid of 12 columns (notes) × 6 rows (octaves C2–B7) where each note you play tints its cell by your accumulated tuning **tendency** (orange = tend high, green = centered, blue = tend low). The sounding cell gets a white border and a cents needle. It is an intonation heat map for practice, not a target-note tuner.
 
-Uso principal de Sergio: **cuerda / viento agudo** (violín, viola, flauta, clarinete…).
+Sergio's main use: **strings / high winds** (violin, viola, flute, clarinet…).
 
 ---
 
-## 2. Especificación funcional (copiar a `docs/SPEC.md` en la fase 0)
+## 2. Functional spec (copied to `docs/SPEC.md` in phase 0)
 
-### 2.1 Entrar y salir
+The full current spec, with later changes, is in `SPEC.md` ("Tuner — ToneMap view"). Original decisions:
 
-- Estando en el afinador, **`T` alterna** entre la vista clásica (aguja + nota objetivo, la de ahora) y la vista
-  **ToneMap**. Hoy `T` dentro del afinador no hace nada.
-- Al llegar al afinador desde otro modo, se abre **la última vista usada** (persistida en NVS).
-- La barra inferior no cambia: sigue mostrando `T:Tuner` resaltado. Las demás teclas globales siguen igual
-  (`M`, `G`, `A`, volumen `-`/`=`).
-- Al entrar en ToneMap con el drone sonando, el drone se para y el micro arranca (micro y altavoz son
-  excluyentes en el ADV). En ToneMap **no hay drone**.
+### 2.1 Entering and leaving
+- Inside the tuner **`T` toggles** between classic view (needle + target note) and **ToneMap**. Arriving from another mode opens **the last view used** (NVS). Bottom bar unchanged. Entering ToneMap with the drone playing stops the drone and starts the mic (exclusive on the ADV). **No drone** in ToneMap.
 
-### 2.2 Distribución de pantalla (lienzo de contenido 240 × 125)
+### 2.2 Screen layout (content canvas 240 × 125)
+Info strip on top (Font0, 6×8 px chars, height 15 px + 1 px dark gray line), then the grid from y=17: 6 rows × 18 px (y 17..124), 12 columns × 20 px; top row = highest octave, C2 bottom-left, B7 top-right. Fixed range in v1 (written MIDI 36..107). Diagram: see `SPEC.md`.
 
-```
-y=0   ┌─────────────────────────────────────────────┐
-      │ A4  +3.2c  442.6 Hz        Bb  A=442  ▮▮▮▯ │  franja de info, Font0 (6×8 px por carácter)
-y=15  ├─────────────────────────────────────────────┤  línea 1 px gris oscuro
-y=17  ├───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┤
-      │C7 │C# │D  │D# │E  │F  │F# │G  │G# │A  │A# │B  │  6 filas × 18 px = 108 px (y 17..124)
-      │C6 │   │   │   │   │   │   │   │   │   │   │   │  12 columnas × 20 px = 240 px
-      │C5 │   │   │   │   │   │   │   │   │   │   │   │  fila de arriba = octava más aguda
-      │C4 │   │   │   │▒▒ │   │   │   │   │███│   │   │
-      │C3 │   │   │   │   │   │   │   │   │   │   │   │
-      │C2 │   │   │   │   │   │   │   │   │   │   │   │
-y=125 └───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘
-      (barra de modos de main.cpp, sin cambios)
-```
+### 2.3 Cells
+- Grid lines 1 px `#374151`. Background `#000000`.
+- **Label:** note name only (`C#`, or `Db` with flats); the C column also carries the octave (`C4`). Font0, color `#4b5563` while never touched, white once touched (`visited`).
+- **Background color** = blend of black and the trend color by intensity (§3.4). Fixed palette (ToneMap's): high `#FFAA00`, center `rgb(34,197,94)`, low `#0056D6`. *(Replaced 2026-10-22: two palettes, Safe and Extreme (formerly Classic), key `P`; see §9 and `SPEC.md`.)*
+- **Active cell** (note sounding now, after the gates of §3.2): inner white 2 px border *(replaced 2026-10-22 by four L corners and then, the same day, by a white bottom bar + white label; see `SPEC.md`)*, a black 2 px reference line at the cell's vertical center and the **needle**: red bar `#ef4444`, 2 px high across the cell. Up = high. Travel 10 %–90 % of height for −50…+50 cents (formula §3.5).
 
-Los píxeles exactos de la franja los ajusta el implementador; la cuadrícula es fija: 20 × 18 px por celda,
-C2 abajo a la izquierda, B7 arriba a la derecha. Rango fijo en la v1 (MIDI escrito 36..107).
+### 2.4 Info strip (top row)
+- Left: detected note and written octave (`A4`), signed cents with one decimal (`+3.2c`), real Hz. Cents green inside the mode's dead zone (§3.3), white otherwise. No valid note: `--`.
+- Out of range (written note < C2 or > B7): `Below range` / `Above range`.
+- Right: transposition if not C (`Bb`, `Eb`, `F`), `A=442` (same A as the classic tuner), mic level meter (~30 px) with a mark at the noise gate threshold.
+- **Transient messages** on setting changes, 1.5 s, in the place of note/cents/Hz: `Sensitivity: Hard`, `History: 30 s`, `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`, `LED: off`, `Map cleared`. Paused: fixed `Paused (Space)`.
 
-### 2.3 Celdas
+### 2.5 Keys in the ToneMap view
 
-- Líneas de cuadrícula 1 px `#374151`. Fondo `#000000`.
-- **Etiqueta:** solo el nombre de la nota (`C#`, o `Db` con bemoles); la columna C lleva además la octava
-  (`C4`). Font0, color `#4b5563` mientras la celda no se ha tocado nunca, blanco cuando ya se ha tocado
-  (`visited`).
-- **Color de fondo** = mezcla entre negro y el color de tendencia según la intensidad (§3.4).
-  Paleta fija (la de ToneMap): alto `#FFAA00`, centro `rgb(34,197,94)`, bajo `#0056D6`.
-  *(Sustituido el 2026-10-22: dos paletas, Safe y Extreme (antes Classic), tecla `P`; ver la nota "Cambios tras pruebas en
-  dispositivo" al final y `SPEC.md`.)*
-- **Celda activa** (la nota que suena ahora, tras pasar las puertas de §3.2): borde blanco interior de 2 px
-  *(sustituido el 2026-10-22 por cuatro esquinas en L y después, el mismo día, por una barra blanca inferior + etiqueta blanca; ver `SPEC.md`)*,
-  una línea de referencia negra de 2 px en el centro vertical de la celda y la **aguja**: barra roja
-  `#ef4444` de 2 px de alto a lo ancho de la celda. Posición vertical: arriba = alto. Recorrido del 10 % al
-  90 % de la altura para −50…+50 cents (fórmula en §3.5).
-
-### 2.4 Franja de información (fila superior)
-
-- Izquierda: nota detectada y octava escrita (`A4`), cents con signo y un decimal (`+3.2c`), frecuencia real en Hz.
-  Los cents se pintan en **verde** si estás dentro de la zona muerta del modo (§3.3), blancos si no. Sin nota
-  válida: `--`.
-- Fuera de rango (nota escrita < C2 o > B7): en lugar de la nota, `Below range` / `Above range`.
-- Derecha: transposición si no es C (`Bb`, `Eb`, `F`), `A=442` (la misma La del afinador clásico) y un
-  medidor de nivel del micro (unos 30 px) con una marca en el umbral de la puerta de ruido.
-- **Mensajes transitorios** al cambiar un ajuste: durante 1,5 s ocupan el sitio de nota/cents/Hz (la parte
-  derecha sigue visible): `Sensitivity: Hard`,
-  `History: 30 s`, `Color hold: 2 min`, `Noise gate: High`, `Transpose: Bb`, `Accidentals: flats`,
-  `LED: off`, `Map cleared`. En pausa: `Paused (Space)` fijo.
-
-### 2.5 Teclas en la vista ToneMap
-
-| Tecla | Acción |
+| Key | Action |
 |---|---|
-| `T` | Volver a la vista clásica |
-| Arriba / Abajo | La de referencia ±1 Hz (la misma `refA` del clásico, 400–480, persistente) |
-| `S` | Sensibilidad: Relaxed → Medium → Hard → … |
+| `T` | Back to classic view |
+| Up / Down | Reference A ±1 Hz (same `refA` as classic, 400–480, persistent) |
+| `S` | Sensitivity: Relaxed → Medium → Hard → … |
 | `H` | History: 1 s → 3 s → 30 s → Unlimited → … |
 | `C` | Color hold: 5 s → 15 s → 30 s → 2 min → 5 min → No fade → … |
-| `N` | Puerta de ruido: None → Low → Med → High → … |
-| `K` | Transposición: C → Bb → Eb → F → … |
-| `F` | Sostenidos ↔ bemoles en etiquetas y franja |
-| `L` | LED de afinado on/off |
-| `P` | Paleta Safe ↔ Extreme *(añadida el 2026-10-22; antes "Classic")* |
-| `R` | Borrar el mapa (todas las celdas) |
-| `Space` | Pausar / reanudar la escucha (el mapa se congela; en pausa no se pinta nada) |
-| Izquierda / Derecha | Sin uso en la v1 (reservadas para temperamentos en el futuro) |
+| `N` | Noise gate: None → Low → Med → High → … |
+| `K` | Transposition: C → Bb → Eb → F → … |
+| `F` | Sharps ↔ flats in labels and strip |
+| `L` | Tuning LED on/off |
+| `P` | Palette Safe ↔ Extreme *(added 2026-10-22; formerly "Classic")* |
+| `R` | Clear the map (all cells) |
+| `Space` | Pause / resume listening (map freezes; nothing painted while paused) |
+| Left / Right | Unused in v1 (reserved for future temperaments) |
 
-Las teclas globales (`M`, `G`, `A`, `-`, `=`) las sigue capturando `main.cpp` antes que el modo: no usar esas letras.
+Global keys (`M`, `G`, `A`, `-`, `=`) are still captured by `main.cpp` before the mode: do not use those letters.
 
-### 2.6 Ajustes, valores por defecto y persistencia
+### 2.6 Settings, defaults, persistence
+All saved in NVS with the existing deferred mechanism (`settings::touch()`).
 
-Todos se guardan en NVS con el mecanismo diferido que ya existe (`settings::touch()`).
-
-| Ajuste | Valores | Defecto | Clave NVS (≤15 car.) |
+| Setting | Values | Default | NVS key (≤15 chars) |
 |---|---|---|---|
-| Vista del afinador | classic / tonemap | classic | `tunerView` |
-| Sensibilidad | relaxed / medium / hard | medium | `tmSens` |
+| Tuner view | classic / tonemap | classic | `tunerView` |
+| Sensitivity | relaxed / medium / hard | medium | `tmSens` |
 | History | 1 s / 3 s / 30 s / unlimited | 3 s | `tmHist` |
 | Color hold | 5 s / 15 s / 30 s / 120 s / 300 s / no fade | 30 s | `tmHold` |
-| Puerta de ruido | none / low / med / high | low | `tmGate` |
-| Transposición | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
-| Alteraciones | sharps / flats | sharps | `tmFlats` |
-| LED de afinado | on / off | on | `tmLed` |
-| Paleta *(añadida el 2026-10-22)* | safe / extreme | safe | `tmPal` |
-| La de referencia | 400–480 Hz | 442 (ya existe) | `refA` (ya existe) |
+| Noise gate | none / low / med / high | low | `tmGate` |
+| Transposition | C (0) / Bb (−2) / Eb (+3) / F (+5) | C | `tmTransp` |
+| Accidentals | sharps / flats | sharps | `tmFlats` |
+| Tuning LED | on / off | on | `tmLed` |
+| Palette *(added 2026-10-22)* | safe / extreme | safe | `tmPal` |
+| Reference A | 400–480 Hz | 442 (exists) | `refA` (exists) |
 
-Los valores de transposición son los de ToneMap (semitonos; nota escrita = nota de concierto − valor, ver §3.2).
-Añadir A (clarinete en La, −3) es trivial si Sergio lo pide más adelante.
+Transposition values are ToneMap's (semitones; written note = concert note − value, see §3.2). Adding A (clarinet in A, −3) is trivial on request.
 
-### 2.7 El mapa de calor
-
-- Comportamiento = ToneMap (§3). El mapa vive en RAM **mientras el dispositivo esté encendido**: sobrevive a
-  cambiar de modo o de vista y volver; se borra con `R` o al apagar. No se guarda en flash ni en SD.
-- Cambiar la La **re-puntúa** el historial (los colores se recalculan contra la nueva referencia), como en ToneMap.
-- Cambiar la transposición **desplaza** el mapa (la misma nota de concierto cae en otra celda escrita), como en
-  ToneMap. Lo que se salga del rango almacenado se pierde.
-- Cambiar sensibilidad o History recalcula los colores de todas las celdas desde el historial guardado.
+### 2.7 The heat map
+- Behavior = ToneMap (§3). The map lives in RAM **while the device is on**: survives mode/view switches; cleared with `R` or power off. Not saved to flash or SD.
+- Changing A **re-scores** the history (colors recomputed against the new reference), as in ToneMap.
+- Changing transposition **shifts** the map (same concert note lands in another written cell), as in ToneMap. Whatever leaves the stored range is lost.
+- Changing sensitivity or History recomputes all cell colors from the stored history.
 
 ### 2.8 LED
+- With `LED` on: RGB LED (GPIO 21, `neopixelWrite`) lights **green** while the active note is inside the mode's dead zone and turns off when it leaves, there is no note, or paused.
+- Known hardware restriction (see SPEC, metronome): LED shares the backlight pin and **only works at screen brightness 255**. With LED on, the ToneMap view saves the user's brightness, sets 255 and restores it on leaving the view or mode, or on LED off. Repeat each LED command twice (at 6 and 12 ms), like the metronome.
+- Do not refactor the metronome's LED code; duplicate the minimum in ToneMap code.
 
-- Con `LED` on: el LED RGB (GPIO 21, `neopixelWrite`) se enciende **verde** mientras la nota activa está dentro
-  de la zona muerta del modo, y se apaga en cuanto sale, no hay nota o se pausa.
-- Restricción de hardware ya conocida (ver SPEC, metrónomo): el LED se alimenta del mismo pin que la
-  retroiluminación y **solo funciona con la pantalla a brillo 255**. Con LED on, la vista ToneMap guarda el brillo
-  del usuario, pone 255 y lo restaura al salir de la vista o del modo, o al poner LED off.
-  Repetir cada orden del LED dos veces (a los 6 y 12 ms), como hace el metrónomo.
-- No refactorizar el código del LED del metrónomo; duplicar el mínimo necesario en el código de ToneMap.
-
-### 2.9 Fuera de alcance en la v1
-
-Temperamentos y centro tonal, stretch Railsback, Note View (Ribbons/Balloons), grabador y WAV, editor de paleta,
-AGC, estadísticas, guardar el mapa en SD, cambiar el rango visible. La arquitectura no debe impedir añadir
-temperamentos después (columnas de ancho variable): la conversión frecuencia → nota debe pasar por una única
-función "offset de destino por nota", como en ToneMap.
+### 2.9 Out of scope in v1
+Temperaments and tonal center, Railsback stretch, Note View (Ribbons/Balloons), recorder and WAV, palette editor, AGC, statistics, saving the map to SD, changing the visible range. The architecture must not prevent adding temperaments later (variable-width columns): frequency → note conversion must go through a single "target offset per note" function, as in ToneMap.
 
 ---
 
-## 3. Referencia técnica extraída de ToneMap
+## 3. Technical reference extracted from ToneMap
 
-Todo esto está en `index.html` de tonemap.live (JS en línea, ~9000 líneas). Los números de línea cambian:
-**busca por nombre de función**. Fase 1 verifica este resumen contra el original.
+All in tonemap.live `index.html` (inline JS, ~9000 lines). Line numbers change: **search by function name**. Phase 1 verifies this summary against the original.
 
 ### 3.1 Detector (pitchy 4.0.1, `PitchDetector.findPitch`)
+McLeod Pitch Method over a 2048-sample window (Web Audio, 44.1/48 kHz, `fftSize 2048`, `smoothingTimeConstant 0`), run on every `requestAnimationFrame` (~60 Hz, overlapping windows).
+1. Autocorrelation r'(τ) for τ = 0..N−1 (pitchy uses FFT; same result as direct sum).
+2. Type II NSDF: `n(τ) = 2·r'(τ) / m'(τ)`, with `m'(0) = 2·r'(0)` and `m'(τ+1) = m'(τ) − x[τ]² − x[N−1−τ]²`. If m' ≤ 0, the rest of the NSDF is 0.
+3. **Key maxima**: walk the NSDF; after an ascending zero crossing look for the maximum until the next descending crossing; that maximum is a key maximum.
+4. `nMax` = largest key maximum. Result = **the first key maximum ≥ 0.9 · nMax** (K = 0.9).
+5. Parabolic refinement with both neighbors; `freq = sampleRate / refined τ`, `clarity = min(1, parabola value at the maximum)`.
 
-McLeod Pitch Method sobre una ventana de 2048 muestras (Web Audio, 44,1/48 kHz, `fftSize 2048`,
-`smoothingTimeConstant 0`), ejecutado en cada `requestAnimationFrame` (~60 Hz, ventanas solapadas).
+Metrotonopitecus's classic tuner (`pitch.cpp`) already computes the same NSDF but only within ±2 semitones of the target note and picks the largest peak. ToneMap needs the full range and K = 0.9 selection (this avoids octave errors).
 
-1. Autocorrelación r'(τ) para τ = 0..N−1 (pitchy la hace por FFT; el resultado es el mismo que la suma directa).
-2. NSDF tipo II: `n(τ) = 2·r'(τ) / m'(τ)`, con `m'(0) = 2·r'(0)` y
-   `m'(τ+1) = m'(τ) − x[τ]² − x[N−1−τ]²`. Si m' ≤ 0, el resto de la NSDF vale 0.
-3. **Máximos clave**: se recorre la NSDF; tras un cruce por cero ascendente se busca el máximo hasta el
-   siguiente cruce descendente; ese máximo es un máximo clave.
-4. `nMax` = mayor de los máximos clave. Resultado = **el primer máximo clave ≥ 0,9 · nMax** (K = 0,9).
-5. Refinamiento parabólico con los dos vecinos; `freq = sampleRate / τ_refinado`,
-   `clarity = min(1, valor de la parábola en el máximo)`.
+### 3.2 Gates and note conversion (`tick()`, `freqToNoteData()`)
+- Valid frame if `clarity > 0.8`, `14 < freq < 8200` and `rms ≥ noise threshold` (`loudEnough`).
+- Transposition: `adjustedPitch = pitch · 2^(−transposition/12)`. With Bb (−2) the written note is 2 semitones above concert. Everything else (cells, labels) works in **written notes**.
+- Equal temperament without stretch: `midi = round(12·log2(f/A4)) + 69`, `targetFreq = A4 · 2^((midi−69)/12)`, `cents = 1200·log2(f/targetFreq)`, `errRatio = (f − targetFreq)/targetFreq`. ToneMap builds the target as `440 · 2^((midi−69)/12) · 2^(targetOffsetCents/1200)` with `targetOffsetCents = latticeOffset(midi) + 1200·log2(A4/440)` (v1: `latticeOffset = 0`). Algebraically the same; **keep this form** (a `targetOffsetCents(midi)` function) to add temperaments later and for the re-scoring of §3.4.
+- `onset filter` (attackMs) defaults to 0 in ToneMap: the note is accepted on the first frame. No onset filter in v1.
 
-El afinador clásico de Metrotonopitecus (`pitch.cpp`) ya calcula la misma NSDF, pero solo en ±2 semitonos de la
-nota objetivo y eligiendo el pico mayor. ToneMap necesita el rango completo y la selección por K = 0,9 (es lo que
-evita errores de octava).
+### 3.3 Sensitivity modes (constants)
 
-### 3.2 Puertas y conversión a nota (`tick()`, `freqToNoteData()`)
-
-- Frame válido si `clarity > 0.8`, `14 < freq < 8200` y `rms ≥ umbral de ruido` (`loudEnough`).
-- Transposición: `adjustedPitch = pitch · 2^(−transposition/12)`. Con Bb (−2) la nota escrita sale 2 semitonos
-  por encima de la de concierto. Todo lo demás (celdas, etiquetas) trabaja en **notas escritas**.
-- En temperamento igual sin stretch:
-  `midi = round(12·log2(f/A4)) + 69`, `targetFreq = A4 · 2^((midi−69)/12)`,
-  `cents = 1200·log2(f/targetFreq)`, `errRatio = (f − targetFreq)/targetFreq`.
-  En ToneMap el destino se construye como `440 · 2^((midi−69)/12) · 2^(targetOffsetCents/1200)` con
-  `targetOffsetCents = latticeOffset(midi) + 1200·log2(A4/440)` (en la v1, `latticeOffset = 0`). Es
-  algebraicamente lo mismo; **conserva esta forma** (una función `targetOffsetCents(midi)`) para poder añadir
-  temperamentos y para el re-puntuado de §3.4.
-- `onset filter` (attackMs) por defecto es 0 en ToneMap: la nota se acepta en el primer frame. En la v1 no hay
-  onset filter.
-
-### 3.3 Modos de sensibilidad (constantes)
-
-| Modo | `DEADZONE_RATIO` | `ERR_SCALE` | `NEEDLE_TAU_MS` | Zona muerta (aguja/LED) | Verde puro en color hasta | Color saturado desde |
+| Mode | `DEADZONE_RATIO` | `ERR_SCALE` | `NEEDLE_TAU_MS` | Dead zone (needle/LED) | Pure center color up to | Saturated color from |
 |---|---|---|---|---|---|---|
-| Relaxed | 0.0025 | 0.7 | 350 | ±4,3 c | ±6,2 c | ±31 c (span = 4·dz) |
-| Medium | 0.0021 | 0.7 | 80 | ±3,6 c | ±5,2 c | ±26 c (span = 4·dz) |
-| Hard | 0.00105 | 0.9 | 30 | ±1,8 c | ±2,0 c | ±18 c (span = **8**·dz) |
+| Relaxed | 0.0025 | 0.7 | 350 | ±4.3 c | ±6.2 c | ±31 c (span = 4·dz) |
+| Medium | 0.0021 | 0.7 | 80 | ±3.6 c | ±5.2 c | ±26 c (span = 4·dz) |
+| Hard | 0.00105 | 0.9 | 30 | ±1.8 c | ±2.0 c | ±18 c (span = **8**·dz) |
 
-- **Zona muerta** (texto verde de cents, LED): `|errRatio| ≤ DEADZONE_RATIO` (sin escalar).
-- **Color de tendencia** (`biasRelaxed/biasMedium/biasHard`): `e = avgErrRatio · ERR_SCALE`; si `|e| ≤ dz` →
-  color centro; si no, `t = clamp((|e| − dz) / span, 0, 1)` y se interpola linealmente centro → alto (e > 0) o
-  centro → bajo (e < 0). `span = 4·dz` en Relaxed y Medium, `8·dz` en Hard.
-- **Aguja**: los cents mostrados se suavizan con una EMA `alpha = 1 − exp(−dt/τ)` con τ del modo. La EMA se
-  reinicia cuando cambia la nota o hay silencio.
+- **Dead zone** (green cents text, LED): `|errRatio| ≤ DEADZONE_RATIO` (unscaled).
+- **Trend color** (`biasRelaxed/biasMedium/biasHard`): `e = avgErrRatio · ERR_SCALE`; if `|e| ≤ dz` → center color; else `t = clamp((|e| − dz) / span, 0, 1)` and interpolate linearly center → high (e > 0) or center → low (e < 0). `span = 4·dz` in Relaxed and Medium, `8·dz` in Hard.
+- **Needle**: displayed cents are smoothed with an EMA `alpha = 1 − exp(−dt/τ)` with the mode's τ. EMA resets on note change or silence.
 
-### 3.4 Historia, intensidad y desvanecido (`finalizeActiveSegment`, `getRecentWeightedErr`, `updateCellDisplayColor`)
+### 3.4 History, intensity and fade (`finalizeActiveSegment`, `getRecentWeightedErr`, `updateCellDisplayColor`)
+Per-cell state (`createEmptyCellState`): `totalVoiceMs`, `segments[]`, `biasRGB`, `baseIntensity`, `displayIntensity`, `lastStainAtMs`, `fadeAnchorIntensity`, `visited`.
+- With attackMs = 0, **each valid frame produces a segment** `{startMs, durMs = dt, avgErrRatio = errRatio, targetOffsetCents}` in its note's cell and re-tints the cell in that same frame.
+- `totalVoiceMs += durMs` (since last reset, no window). `baseIntensity = min(1, totalVoiceMs / 500)` (`FULL_CONF_MS = 500`).
+- **Color**: **duration-weighted** mean of `errRatio` over the last `History` seconds **of sound** (walk segments backwards summing durations until the window is covered; silence does not count). Each segment is re-based before averaging: `rebase(err, from, to) = 2^((from − to)/1200) · (1 + err) − 1`, `from` = its `targetOffsetCents`, `to` = the note's current one. So changing A re-scores the history. Unlimited = all segments. The result goes through the mode's `bias*` (§3.3) → `biasRGB`.
+- **Display** every frame (`updateCellDisplayColor`, `STAIN_MIN_FRACTION = 0.25`, `STAIN_FADE_SECONDS = 10`, `STAIN_FADE_IN_MS = 125`):
+  - Medium and Hard: `display = baseIntensity`.
+  - Relaxed: while staining, `display` approaches `baseIntensity` with a 125 ms EMA; otherwise it holds.
+  - Fade: nothing until `holdSeconds` after the last stain. Then a linear ramp over 10 s from its value down to `0.25 · baseIntensity`, and it stays there (never reaches 0 until a reset). No fade = no ramp.
+  - `colorFinal = lerp(background, biasRGB, display)` per channel (black background).
+- Changing sensitivity or History → `recomputeAllCellColorsAndRender()`: recomputes `biasRGB` and intensity of all cells from their segments.
+- Changing transposition → `shiftCellStateBySemitones(old − new)`: each note's state moves to another cell.
+- ToneMap keeps up to 2000 segments per note for `max(History, ColorHold) + 5 s` (max 10 min). **Do not copy that** on the ESP32: see §4.4.
 
-Estado por celda (`createEmptyCellState`): `totalVoiceMs`, `segments[]`, `biasRGB`, `baseIntensity`,
-`displayIntensity`, `lastStainAtMs`, `fadeAnchorIntensity`, `visited`.
+### 3.5 Active cell and needle (`highlightGridCell`, `getNeedleCellPosition`)
+- Equal temperament: `pct = (clamp(cents, −50, 50) + 50) / 100` (0 = low edge, 1 = high edge).
+- Horizontal needle (ToneMap default): `top = (90 − pct·80) %` of cell height. Black reference line at `targetPct = 0.5` → 50 %.
+- The active cell is marked `visited`.
 
-- Con attackMs = 0, **cada frame válido produce un segmento** `{startMs, durMs = dt, avgErrRatio = errRatio,
-  targetOffsetCents}` en la celda de su nota, y re-tiñe la celda en ese mismo frame.
-- `totalVoiceMs += durMs` (acumulado desde el último reset, sin ventana).
-  `baseIntensity = min(1, totalVoiceMs / 500)` (`FULL_CONF_MS = 500`).
-- **Color**: media de `errRatio` **ponderada por duración** de los últimos `History` segundos **de sonido**
-  (se recorren los segmentos hacia atrás sumando duraciones hasta cubrir la ventana; el silencio no cuenta).
-  Cada segmento se re-basa antes de promediar:
-  `rebase(err, from, to) = 2^((from − to)/1200) · (1 + err) − 1`, con `from` = su `targetOffsetCents` y
-  `to` = el actual de esa nota. Así, cambiar la La re-puntúa el historial. Unlimited = todos los segmentos.
-  El color resultante pasa por el `bias*` del modo (§3.3) → `biasRGB`.
-- **Visualización** cada frame (`updateCellDisplayColor`, con `STAIN_MIN_FRACTION = 0.25`,
-  `STAIN_FADE_SECONDS = 10`, `STAIN_FADE_IN_MS = 125`):
-  - Medium y Hard: `display = baseIntensity`.
-  - Relaxed: mientras se tiñe, `display` se acerca a `baseIntensity` con EMA de 125 ms; si no, se mantiene.
-  - Desvanecido: hasta `holdSeconds` desde el último tinte, nada. Después, rampa lineal en 10 s desde el valor
-    que tenía hasta `0.25 · baseIntensity`, y ahí se queda (no llega a 0 hasta un reset). No fade = sin rampa.
-  - `colorFinal = lerp(fondo, biasRGB, display)` por canal (fondo negro).
-- Cambiar sensibilidad o History → `recomputeAllCellColorsAndRender()`: recalcula `biasRGB` e intensidad de todas
-  las celdas desde sus segmentos.
-- Cambiar transposición → `shiftCellStateBySemitones(old − new)`: el estado de cada nota se mueve a otra celda.
-- ToneMap guarda hasta 2000 segmentos por nota durante `max(History, ColorHold) + 5 s` (máx. 10 min). **No hay que
-  copiar eso** en el ESP32: ver §4.4.
+### 3.6 Corrections verified against the source (phase 1, 2026-10-16)
+Phase 1 compared §3 with `tonemap.live/index.html` (bd19db1) and `pitchy@4.0.1`. Constants, color formulas, re-basing, fade, needle and the MPM algorithm match. What follows **corrects or completes** the above and takes precedence. `index.html` line numbers in parentheses.
 
-### 3.5 Celda activa y aguja (`highlightGridCell`, `getNeedleCellPosition`)
+**Corrections**
+- **Needle (§3.3, last point):** with `attackMs = 0` the needle EMA only acts in **Relaxed** (12083-12135: in Medium and Hard `relaxedSmoothingActive` is set to false every frame and the next one is re-seeded with raw cents). **Decision: replicate ToneMap as is**: Medium and Hard show the frame's raw cents; Relaxed uses EMA with τ = 350 ms. Reset on note change or an invalid frame.
+- **Segments (§3.4, first point):** the **first valid frame of each note** (after silence or note change) **produces no segment** (12130-12132, 10500). A frame's segment carries `dtMs` = time since the previous tick, uncapped; if `dtMs ≤ 0` no segment. The segment's `avgErrRatio` is the frame's raw `errRatio`.
+- **Dead zone (§3.3, §2.8):** the rule `|errRatio| ≤ DEADZONE_RATIO` (raw, per frame) is right, but in ToneMap it only highlights a debug text. The green cents text and the LED are Metrotonopitecus design.
+- **Retention (§3.4):** ToneMap prunes by wall-clock time (`max(History, Hold)·1000 + 5000` ms, cap 10 min) and at 2000 segments per note (≈33 s of sound at 60 seg/s). Do not copy (see §4.4).
 
-- En temperamento igual: `pct = (clamp(cents, −50, 50) + 50) / 100` (0 = borde grave, 1 = borde agudo).
-- Aguja horizontal (la de por defecto en ToneMap): `top = (90 − pct·80) %` de la altura de la celda.
-  Línea de referencia negra en `targetPct = 0.5` → 50 %.
-- La celda activa se marca `visited`.
-
-### 3.6 Correcciones verificadas contra el código fuente (fase 1, 2026-10-16)
-
-Fase 1 comparó §3 con `tonemap.live/index.html` (bd19db1) y `pitchy@4.0.1`. Constantes, fórmulas de color, re-basado,
-desvanecido, aguja y algoritmo MPM coinciden. Lo que sigue **corrige o completa** lo anterior y manda sobre ello.
-Números de línea de `index.html` entre paréntesis.
-
-**Correcciones**
-
-- **Aguja (§3.3, último punto):** con `attackMs = 0` la EMA de la aguja solo actúa en **Relaxed** (12083-12135:
-  en Medium y Hard `relaxedSmoothingActive` se pone a false en cada frame y el siguiente se resiembra con los
-  cents crudos). **Decisión: se replica ToneMap tal cual**: Medium y Hard muestran los cents crudos del frame;
-  Relaxed usa EMA con τ = 350 ms. Se reinicia al cambiar de nota o en un frame inválido.
-- **Segmentos (§3.4, primer punto):** el **primer frame válido de cada nota** (tras silencio o cambio de nota) **no
-  produce segmento** (12130-12132, 10500). El segmento de un frame lleva `dtMs` = tiempo desde el tick anterior,
-  sin tope; si `dtMs ≤ 0` no hay segmento. El `avgErrRatio` del segmento es el `errRatio` crudo del frame.
-- **Zona muerta (§3.3, §2.8):** la regla `|errRatio| ≤ DEADZONE_RATIO` (cruda, por frame) es correcta, pero en
-  ToneMap solo resalta un texto de depuración. El texto verde de cents y el LED son diseño de Metrotonopitecus.
-- **Retención (§3.4):** ToneMap poda por tiempo de reloj (`max(History, Hold)·1000 + 5000` ms, tope 10 min) y a
-  2000 segmentos por nota (≈33 s de sonido a 60 seg/s). No hay que copiarlo (ver §4.4).
-
-**Omisiones**
-
-- **Puertas:** frame válido = `hasSignalEnergy && clarity > 0.8 && 14 < pitch < 8200`, con
-  `hasSignalEnergy = rms > 1e-7 || peakAbs > 4e-6`; las cotas de Hz se aplican al pitch **sin transponer**.
-  La puerta de ruido de ToneMap es RMS en escala ±1.0: `[0, 0.025, 0.05, 0.10, 0.25, 0.50]` (None/Min/Low/Med/High/Max,
-  defecto 0.025). Los valores int16 de §4.3 son la adaptación del Cardputer, a calibrar en la PARADA A.
-- **Un solo frame inválido termina la nota** (12157-12164): se cierra el segmento, se limpia la nota activa y se
-  quita la aguja. Sin histéresis. Esto reinicia la EMA y hace que el siguiente frame válido no genere segmento.
-- **Pitchy:** `findPitch` devuelve `[0, 0]` sin máximos clave. El bucle de máximos clave va de i = 1 a N−2;
-  `NSDF[0] = 1` nunca cuenta como cruce ascendente; el máximo se siembra con la muestra del cruce y solo se
-  registra en el siguiente cruce descendente (un lóbulo final sin cerrar se descarta); cruces con `≤ 0` y `> 0`.
-  La NSDF cubre τ = 0..N−1 sin límite superior (pitchy usa FFT en Float32: en la cola de τ grandes, donde `m'` es
-  pequeño, la suma directa puede diferir ligeramente; no es un fallo).
-- **`freqToNoteData`:** parte de `round(semitonos desde A4) + 69` y prueba ±2 candidatos (0..127) minimizando
-  `|(pos − cand)·100 − offset(cand)|`. En temperamento igual sin stretch equivale a `round()`, salvo en el empate
-  exacto .5 (ToneMap elige el inferior, `Math.round` el superior). Irrelevante en la práctica.
-  `getTargetOffsetCents = getLatticeOffsetCents + getA4OffsetCents`, con `getA4OffsetCents = 1200·log2(A4/440)`.
-  En un futuro con stretch, éste se indexa por la nota de concierto y el temperamento por la escrita.
-- **Color (`updateCellDisplayColor`):** se mezcla desde `--grid-bg` (negro en tema oscuro) con canales redondeados;
-  una celda se pinta solo si `displayIntensity > 0.001`. Si `baseIntensity ≤ 0` o la celda nunca se tiñó
-  (`lastStainAtMs = 0`), display = 0. En Relaxed el acercamiento `alpha = 1 − exp(−Δms/125)` usa el tiempo desde la
-  última actualización de esa celda y solo se aplica en el frame en que se tiñó.
-- **`getRecentWeightedErr`:** el segmento del borde de la ventana entra parcialmente (`take = min(durMs, restante)`);
-  devuelve 0 si la duración total es 0.
-- **`recomputeAllCellColorsAndRender`** (al cambiar History, sensibilidad, La o transposición) pone
-  `lastStainAtMs = ahora` y `fadeAnchorIntensity = null` en **todas** las celdas: el temporizador de hold/desvanecido
-  se reinicia. En Relaxed no tira de la intensidad hacia la base (solo Medium/Hard saltan). Cambiar solo el Color hold
-  re-renderiza sin reiniciar nada.
-- **Transposición:** orden de ToneMap = cerrar segmento, desplazar el estado por `old − new`, limpiar la nota activa,
-  quitar la aguja. El desplazamiento descarta lo que cae fuera de MIDI 0..127; los `targetOffsetCents` guardados no
-  se reescriben (se re-basan al recalcular).
-- **Aguja:** los cents que se pintan son los suavizados (`displayCents`); `highlightGridCell` se llama dos veces por tick.
-- **Fixture (fase 4):** `tests/fixtures/temperament-vectors.json` es un objeto con `rows[]` (5192), no un array.
-  Las 264 filas `equal`/`none` son solo **44 vectores distintos** repetidos 6 veces (`pitchCenter`/`anchor` no
-  influyen): midi 33, 45, 57, 60, 64, 67, 69, 72, 81, 93, 105 × cents {0, 30} × A4 {440, 441}, `transposition` = 0.
-  No cubren cents negativos, recorte a ±50 ni redondeos en el límite. **La fase 4 debe añadir esos casos propios**
-  (cents negativos, ±50, ±49,9, empate de redondeo, transposición, extremos MIDI) además de las 264 filas.
-  `expect.needleEven = [pct, targetPct]`; el brief usa `[0]`.
+**Omissions**
+- **Gates:** valid frame = `hasSignalEnergy && clarity > 0.8 && 14 < pitch < 8200`, with `hasSignalEnergy = rms > 1e-7 || peakAbs > 4e-6`; the Hz bounds apply to the **untransposed** pitch. ToneMap's noise gate is RMS on a ±1.0 scale: `[0, 0.025, 0.05, 0.10, 0.25, 0.50]` (None/Min/Low/Med/High/Max, default 0.025). The int16 values of §4.3 are the Cardputer adaptation, to calibrate at STOP A.
+- **A single invalid frame ends the note** (12157-12164): the segment is closed, the active note cleared and the needle removed. No hysteresis. This resets the EMA and makes the next valid frame produce no segment.
+- **Pitchy:** `findPitch` returns `[0, 0]` with no key maxima. The key-maxima loop runs i = 1..N−2; `NSDF[0] = 1` never counts as an ascending crossing; the maximum is seeded with the crossing sample and only recorded at the next descending crossing (an unclosed final lobe is discarded); crossings with `≤ 0` and `> 0`. The NSDF covers τ = 0..N−1 with no upper limit (pitchy uses Float32 FFT: in the tail of large τ, where `m'` is small, the direct sum may differ slightly; not a bug).
+- **`freqToNoteData`:** starts from `round(semitones from A4) + 69` and tests ±2 candidates (0..127) minimizing `|(pos − cand)·100 − offset(cand)|`. In equal temperament without stretch it equals `round()`, except on the exact .5 tie (ToneMap picks the lower, `Math.round` the upper). Irrelevant in practice. `getTargetOffsetCents = getLatticeOffsetCents + getA4OffsetCents`, with `getA4OffsetCents = 1200·log2(A4/440)`. With stretch in the future, this is indexed by the concert note and the temperament by the written one.
+- **Color (`updateCellDisplayColor`):** blends from `--grid-bg` (black in dark theme) with rounded channels; a cell is painted only if `displayIntensity > 0.001`. If `baseIntensity ≤ 0` or the cell was never stained (`lastStainAtMs = 0`), display = 0. In Relaxed the approach `alpha = 1 − exp(−Δms/125)` uses the time since that cell's last update and applies only on the frame it was stained.
+- **`getRecentWeightedErr`:** the segment at the window edge enters partially (`take = min(durMs, remaining)`); returns 0 if total duration is 0.
+- **`recomputeAllCellColorsAndRender`** (on changing History, sensitivity, A or transposition) sets `lastStainAtMs = now` and `fadeAnchorIntensity = null` in **all** cells: the hold/fade timer restarts. In Relaxed it does not pull intensity toward the base (only Medium/Hard jump). Changing only Color hold re-renders without resetting anything.
+- **Transposition:** ToneMap's order = close segment, shift state by `old − new`, clear the active note, remove the needle. The shift discards what falls outside MIDI 0..127; stored `targetOffsetCents` are not rewritten (re-based on recompute).
+- **Needle:** the painted cents are the smoothed ones (`displayCents`); `highlightGridCell` is called twice per tick.
+- **Fixture (phase 4):** `tests/fixtures/temperament-vectors.json` is an object with `rows[]` (5192), not an array. The 264 `equal`/`none` rows are only **44 distinct vectors** repeated 6 times (`pitchCenter`/`anchor` do not matter): midi 33, 45, 57, 60, 64, 67, 69, 72, 81, 93, 105 × cents {0, 30} × A4 {440, 441}, `transposition` = 0. They do not cover negative cents, clipping at ±50 or rounding at the boundary. **Phase 4 must add own cases** (negative cents, ±50, ±49.9, rounding tie, transposition, MIDI extremes) besides the 264 rows. `expect.needleEven = [pct, targetPct]`; the brief uses `[0]`.
 
 ---
 
-## 4. Adaptación al ESP32-S3 (Cardputer ADV)
+## 4. ESP32-S3 adaptation (Cardputer ADV)
 
-### 4.1 Captura continua con solape
+### 4.1 Continuous capture with overlap
+- The classic records 2048 samples, processes, records again: gaps, ~8 readings/s. ToneMap needs **continuous** capture and **25–30 readings/s**.
+- M5Unified 0.2.25 `Mic_Class` allows **two queued recordings** (`_rec_info[2]`; `isRecording()` returns 0, 1 or 2; `record()` fails if the queue is full). Scheme: chunks of `HOP` samples in different buffers, two always queued; when one finishes it is copied into a ring of `WINDOW` samples and the next is queued. The **most recent window** is always analyzed; if analysis lags, windows are skipped (analyses are never queued).
+- Starting point: `WINDOW = 2048`, `HOP = WINDOW / 2`. Phase 2 confirms by reading the M5Unified code.
+- **Sample rate: 16 kHz or 32 kHz, decided by phase 3 by measuring.** At 16 kHz, B7 (3951 Hz) has a period of ~4 samples and octave-7 precision will be poor. At 32 kHz B7's period is ~8 samples and C2 (65.4 Hz) ≈ 489 lag, which fits `WINDOW = 2048`. 32 kHz is the initial bet given Sergio's high register. Measure cents error at C2, C4, C6, C7 and B7 and time per analysis. If octave 7 does not reach ±3 c even at 32 kHz, accept and document as "best effort".
 
-- El clásico graba 2048 muestras, procesa y vuelve a grabar, con huecos y unas 8 lecturas por segundo. ToneMap
-  necesita captura **continua** y unas **25–30 lecturas por segundo**.
-- M5Unified 0.2.25 `Mic_Class` admite **dos grabaciones en cola** (`_rec_info[2]`; `isRecording()` devuelve
-  0, 1 o 2; `record()` falla si la cola está llena). Esquema: trozos de `HOP` muestras en búferes distintos, dos
-  siempre en cola; cuando uno termina, se copia a un anillo de `WINDOW` muestras y se encola el siguiente. Se
-  analiza siempre **la ventana más reciente**; si el análisis va retrasado, se saltan ventanas (nunca se encolan
-  análisis).
-- Punto de partida: `WINDOW = 2048`, `HOP = WINDOW / 2`. La fase 2 lo confirma leyendo el código de M5Unified.
-- **Frecuencia de muestreo: 16 kHz o 32 kHz, decide la fase 3 midiendo.**
-  - A 16 kHz, B7 (3951 Hz) tiene un periodo de ~4 muestras y la precisión en la octava 7 será mala.
-  - A 32 kHz el periodo de B7 es ~8 muestras, y C2 (65,4 Hz) ≈ 489 de retardo, que cabe con `WINDOW = 2048`.
-  - 32 kHz es la apuesta inicial por el uso de Sergio (registro agudo). Hay que medir el error en cents en C2,
-    C4, C6, C7 y B7 y el tiempo por análisis.
-  - Si la octava 7 no da ±3 c ni a 32 kHz, se acepta y se documenta como "best effort".
+### 4.2 Full-range detector
+- New file, no Arduino dependencies (like `pitch.cpp`): implementation of §3.1 in `float` (S3 FPU is single precision; no `double`).
+- Direct sum (O(N·τmax)) with pitchy's incremental denominator. Limit τ to `[sampleRate/4200, τmax]` with τmax for ~62 Hz. Estimate: 10–20 ms per analysis; **measure it**.
+- If too slow, options in order: (a) lower `WINDOW` to 1536, (b) decimate to 16 kHz for large τ, (c) FFT autocorrelation with `esp-dsp`. (c) is **a new dependency: ask Sergio first**.
+- Do not touch `pitch.cpp`: the classic tuner keeps its detector. (Note 2026-10-24: the classic ended up using ToneMap's detector and `pitch.cpp/.h` was deleted.)
 
-### 4.2 Detector de rango completo
+### 4.3 Mic thresholds
+- Cardputer amplitudes are not a browser's. The classic uses `kMinRms = 120` (int16) and `kMinClarity = 0.75`.
+- ToneMap uses `clarity > 0.8`. Start with 0.8 and tune at STOP A.
+- Noise gate (RMS in int16 units, to calibrate at STOP A): `None = 0` (clarity gate only), `Low = 120` (the classic's, proven), `Med ≈ 300`, `High ≈ 800`.
 
-- Fichero nuevo, sin dependencias de Arduino (como `pitch.cpp`): implementación de §3.1 en `float` (el FPU del S3
-  es de precisión simple; nada de `double`).
-- Suma directa (O(N·τmax)) con el denominador incremental de pitchy. Limitar τ a `[sampleRate/4200, τmax]` con
-  τmax para ~62 Hz. Estimación: 10–20 ms por análisis; **medirlo**.
-- Si no cabe en tiempo, opciones por orden: (a) bajar `WINDOW` a 1536, (b) diezmar a 16 kHz para τ grandes,
-  (c) autocorrelación por FFT con `esp-dsp`. La (c) es **una dependencia nueva: preguntar a Sergio antes**.
-- No tocar `pitch.cpp`: el afinador clásico sigue con su detector. (Nota 2026-10-24: el clásico acabó usando el detector de ToneMap y `pitch.cpp/.h` se borró.)
+### 4.4 History memory (do not replicate 2000 segments per note)
+- The weighted mean and re-basing are **affine** in `err`, so **consecutive frames can be merged** into chunks without changing the result (except at the window edge, with error ≤ one chunk's duration).
+- Proposal (phase 2 closes it): per note keep `totalVoiceMs`, the running sum for Unlimited, a **fine** ring (chunks ≤ 100 ms, covers ≥ 3.2 s for History 1 s and 3 s) and a **coarse** ring (chunks ≤ 1 s, covers ≥ 30 s). Each chunk holds `durMs` and `err` (int16 in hundredths of a cent is enough). On changing A, re-base all stored chunks in place (equivalent to ToneMap's per-segment re-basing, since the transform is affine).
+- Stored range: at least the 72 visible notes; ideally MIDI 0..127 if it fits, so transposition loses no data.
+- **Budget: ≤ 40 KB for the whole map state.** Check in phase 2 whether the ADV has PSRAM (`ESP.getPsramSize()` over serial). Assume none.
+- Map state must live outside the view object (static or the mode's) to survive mode switches.
 
-### 4.3 Umbrales de micro
+### 4.5 Drawing
+- Existing 240×125 16-bit canvas; `draw()` limited to ~30 ms per frame, like the classic.
+- Redrawing the whole frame is acceptable: 72 rectangles plus text. Colors are blended in RGB888 and converted with `color565`.
+- Measure `draw()` + `pushSprite` + analysis time in the bench. If the loop does not reach ~25 readings/s with the screen at 30 fps, drop to 20 fps.
 
-- Las amplitudes del Cardputer no son las de un navegador. El clásico usa `kMinRms = 120` (int16) y
-  `kMinClarity = 0.75`.
-- ToneMap usa `clarity > 0.8`. Arrancar con 0.8 y ajustarlo en la PARADA A.
-- Puerta de ruido (RMS en unidades int16, a calibrar en la PARADA A): `None = 0` (solo puerta de claridad),
-  `Low = 120` (la del clásico, probada), `Med ≈ 300`, `High ≈ 800`.
+### 4.6 Time
+- Use `millis()` in the model passed as a parameter, so the model is pure and testable.
+- Each segment's `dt` = real duration of the jump between analyzed windows (`HOP / sampleRate` if none skipped).
 
-### 4.4 Memoria del historial (no hay que replicar 2000 segmentos por nota)
+### 4.7 Changes outside the new files (minimal)
+- `ui.h`: add an empty `virtual void onReselect() {}` to `Mode`.
+- `main.cpp`: in `handleKey`, if the key is the current mode's hotkey, call `current->onReselect()` instead of doing nothing. Other modes keep behavior (their `onReselect` is empty). Do not send the key to `onKey`: the metronome would cancel its tap measurement.
+- `settings.h/.cpp`: the fields and keys of §2.6 (with `clampAll`, `load`, `tick`).
+- `mode_tuner.cpp`: current view (classic or ToneMap) and `onReselect()` that toggles. In ToneMap it delegates `enter`, `leave`, `onKey`, `update`, `draw` and `afterPush` to the new view. The classic part is unchanged.
+- `platformio.ini`: bench and debug environments (§5). No new libraries.
 
-- La media ponderada y el re-basado son **afines** en `err`. Por eso se pueden **fusionar frames consecutivos**
-  en trozos sin cambiar el resultado (salvo el borde de la ventana, con un error ≤ la duración de un trozo).
-- Propuesta (la fase 2 la cierra):
-  - Por nota guardar `totalVoiceMs`, la suma acumulada para Unlimited, un anillo **fino** (trozos de ≤ 100 ms,
-    cubre ≥ 3,2 s para History 1 s y 3 s) y un anillo **grueso** (trozos de ≤ 1 s, cubre ≥ 30 s).
-  - Cada trozo lleva `durMs` y `err` (con int16 en centésimas de cent basta).
-  - Al cambiar la La, re-basar en el sitio todos los trozos guardados (equivale al re-basado por segmento de
-    ToneMap, porque la transformación es afín).
-- Rango almacenado: al menos las 72 notas visibles; idealmente MIDI 0..127 si cabe. Así la transposición no
-  pierde datos.
-- **Presupuesto: ≤ 40 KB para todo el estado del mapa.** Comprobar en la fase 2 si el ADV tiene PSRAM
-  (`ESP.getPsramSize()` por serie). Suponer que no la tiene.
-- El estado del mapa debe vivir fuera del objeto vista (estático o del modo), para sobrevivir a cambiar de modo.
-
-### 4.5 Dibujo
-
-- Lienzo de 240×125 a 16 bits ya existente; `draw()` con límite de ~30 ms por fotograma, como el clásico.
-- Redibujar el fotograma entero es aceptable: 72 rectángulos más el texto.
-- Los colores se mezclan en RGB888 y se convierten con `color565`.
-- Medir en el bench el tiempo de `draw()` + `pushSprite` + análisis. Si el bucle no llega a ~25 lecturas/s
-  con la pantalla a 30 fps, bajar a 20 fps.
-
-### 4.6 Tiempo
-
-- Usar `millis()` en el modelo pasándolo como parámetro, para que el modelo sea puro y comprobable.
-- `dt` de cada segmento = duración real del salto entre ventanas analizadas (`HOP / sampleRate` si no se saltó
-  ninguna).
-
-### 4.7 Cambios fuera de los ficheros nuevos (mínimos)
-
-- `ui.h`: añadir a `Mode` un `virtual void onReselect() {}` vacío.
-- `main.cpp`: en `handleKey`, si la tecla es el hotkey del modo actual, llamar a `current->onReselect()` en vez de
-  no hacer nada. Los otros modos no cambian de comportamiento, porque su `onReselect` está vacío. No mandar la
-  tecla a `onKey`: el metrónomo cancelaría su medida de tap.
-- `settings.h/.cpp`: los campos y claves de §2.6 (con `clampAll`, `load`, `tick`).
-- `mode_tuner.cpp`: vista actual (clásica o ToneMap) y `onReselect()` que alterna. En ToneMap delega `enter`,
-  `leave`, `onKey`, `update`, `draw` y `afterPush` en la vista nueva. La parte clásica no cambia.
-- `platformio.ini`: entornos de bench y depuración (§5). Sin librerías nuevas.
-
-### 4.8 Ficheros nuevos sugeridos (la fase 2 puede ajustarlos)
-
-- `src/pitch_mpm.{h,cpp}`: detector de rango completo (sin Arduino).
-- `src/tonemap_model.{h,cpp}`: notas, segmentos y trozos, colores, desvanecido, re-basado, desplazamiento por
-  transposición, reset (sin Arduino; recibe `nowMs`).
-- `src/tonemap_audio.{h,cpp}`: captura continua con solape sobre `M5Cardputer.Mic`.
-- `src/tonemap_view.{h,cpp}`: dibujo, teclas, LED y franja; lo usa `mode_tuner.cpp`.
-- `src/tonemap_bench.cpp`: solo con `-DTONEMAP_BENCH` (§5, fase 3).
-- Cabecera en los ficheros portados:
-  `Ported from tonemap.live (MIT, (c) 2025 Jeremy Black) and pitchy 4.0.1 (MIT)`.
+### 4.8 Suggested new files (phase 2 may adjust)
+- `src/pitch_mpm.{h,cpp}`: full-range detector (no Arduino).
+- `src/tonemap_model.{h,cpp}`: notes, segments and chunks, colors, fade, re-basing, transposition shift, reset (no Arduino; takes `nowMs`).
+- `src/tonemap_audio.{h,cpp}`: continuous overlapped capture over `M5Cardputer.Mic`.
+- `src/tonemap_view.{h,cpp}`: drawing, keys, LED and strip; used by `mode_tuner.cpp`.
+- `src/tonemap_bench.cpp`: only with `-DTONEMAP_BENCH` (§5, phase 3).
+- Header on ported files: `Ported from tonemap.live (MIT, (c) 2025 Jeremy Black) and pitchy 4.0.1 (MIT)`.
 
 ---
 
-## 5. Plan de ejecución por fases y agentes
+## 5. Execution plan by phases and agents
 
-Agentes de Claude Code:
-- `Explore`: solo lectura, rápido para barrer código.
-- `Plan`: arquitecto, solo lectura, devuelve un plan.
-- `general-purpose`: lee, escribe y ejecuta.
+Claude Code agents: `Explore` (read-only, fast code sweeps), `Plan` (read-only architect, returns a plan), `general-purpose` (reads, writes, runs). Read-only agents return text and the orchestrator writes it into `docs/`.
 
-Los agentes de solo lectura devuelven el texto y el orquestador lo escribe en `docs/`.
-
-| Fase | Agente | Entrega | Parada |
+| Phase | Agent | Deliverable | Stop |
 |---|---|---|---|
-| 0 Preparación | orquestador | rama, SPEC actualizado, referencias a mano | — |
-| 1 Verificar la referencia | `Explore` (very thorough) | lista de discrepancias con §3 (o "OK") | — |
-| 2 Diseño ESP32 | `Plan` | `docs/TONEMAP_DESIGN.md` | solo si contradice §2 |
-| 3 Captura + detector + bench | `general-purpose` | `pitch_mpm`, `tonemap_audio`, entorno bench | — |
-| 4 Modelo del mapa + bench | `general-purpose` | `tonemap_model` + pruebas de paridad | **PARADA A** |
-| 5 Vista e integración | `general-purpose` | firmware con la vista ToneMap | **PARADA B** |
-| 6 Revisión independiente | `general-purpose` nuevo, sin contexto, sin editar | informe de hallazgos | — |
-| 7 Correcciones y ajuste fino | orquestador (+ `general-purpose` si hace falta) | firmware final, SPEC con casillas | **PARADA C** |
+| 0 Preparation | orchestrator | branch, updated SPEC, references at hand | — |
+| 1 Verify the reference | `Explore` (very thorough) | list of discrepancies with §3 (or "OK") | — |
+| 2 ESP32 design | `Plan` | `docs/TONEMAP_DESIGN.md` | only if it contradicts §2 |
+| 3 Capture + detector + bench | `general-purpose` | `pitch_mpm`, `tonemap_audio`, bench env | — |
+| 4 Map model + bench | `general-purpose` | `tonemap_model` + parity tests | **STOP A** |
+| 5 View and integration | `general-purpose` | firmware with the ToneMap view | **STOP B** |
+| 6 Independent review | new `general-purpose`, no context, no edits | findings report | — |
+| 7 Fixes and fine tuning | orchestrator (+ `general-purpose` if needed) | final firmware, SPEC with checkboxes | **STOP C** |
 
-### Fase 0 — Preparación (orquestador)
-
-1. `git fetch origin && git checkout feature/tonemap` (si `main` avanzó desde el 2026-10-16, `git rebase origin/main`).
-2. Añadir a `docs/SPEC.md` una sección "Afinador — vista ToneMap" con el contenido de §2 de este brief, y
-   enlazar este brief.
-3. Referencias **fuera del repo** (p. ej. `..\refs\`):
-   - `git clone --depth 1 https://github.com/crossrhythm/tonemap.live`.
-   - `npm pack pitchy@4.0.1` y descomprimirlo (si no hay npm: https://unpkg.com/pitchy@4.0.1/index.js).
-   - Las fuentes de M5Unified 0.2.25 ya están en `.pio/libdeps/cardputer-adv/M5Unified` tras un `pio run`.
-4. Commit `docs: ToneMap section in SPEC` y push.
-
-### Fase 1 — Verificar la referencia (`Explore`, very thorough)
-
-Prompt base:
-> Read-only. Compare section 3 of `docs/TONEMAP_BRIEF.md` against the real sources: `tonemap.live/index.html`
-> (functions `tick`, `freqToNoteData`, `getTargetOffsetCents`, `biasRelaxed`, `biasMedium`, `biasHard`,
-> `finalizeActiveSegment`, `getRecentWeightedErr`, `rebaseErrRatio`, `updateCellDisplayColor`,
-> `recomputeAllCellColorsAndRender`, `shiftCellStateBySemitones`, `highlightGridCell`, `getNeedleCellPosition`,
-> the mode/stain/history constants) and `pitchy/index.js` (`findPitch`, `_nsdf`, `getKeyMaximumIndices`,
-> `refineResultIndex`). Report every formula, constant or behaviour where the brief is wrong or incomplete,
-> quoting the source. If it all matches, say so. Do not summarise the rest of the app.
-
-El orquestador corrige §3 si hay discrepancias y hace commit.
-
-### Fase 2 — Diseño para el ESP32 (`Plan`)
-
-Prompt base:
-> Design the ESP32-S3 implementation of the ToneMap view for this repo, following `docs/TONEMAP_BRIEF.md`
-> §2–4 and the current code (`src/*`, `platformio.ini`). Read M5Unified 0.2.25 `Mic_Class` in `.pio/libdeps` to
-> confirm the two-slot record queue and pick the capture scheme. Deliver: file list with responsibilities and
-> public interfaces; data structures of the map state with a byte count (budget ≤ 40 KB, assume no PSRAM);
-> the capture/analysis/draw schedule inside the existing `loop()` with a CPU time estimate; the exact
-> `onReselect`, settings and `mode_tuner.cpp` changes; the bench and debug build environments and what they
-> print over serial. Keep the classic tuner, metronome, game and About untouched. Flag anything that
-> contradicts the spec instead of changing it.
-
-El orquestador guarda el resultado en `docs/TONEMAP_DESIGN.md` y hace commit. Solo para a preguntar a Sergio si
-el diseño exige cambiar algo de §2 o añadir una dependencia.
-
-### Fase 3 — Captura continua, detector y bench (`general-purpose`)
-
-1. `pitch_mpm` según §3.1/§4.2 y `tonemap_audio` según §4.1 y el diseño.
-2. Entorno `cardputer-adv-tonemap-bench` (`-DTONEMAP_BENCH`): al arrancar, en lugar de la app normal:
-   - **Precisión sintética**: genera en memoria senoidales y dientes de sierra (con armónicos, como un violín)
-     a 16 kHz y a 32 kHz para C2, A2, C3, C4, A4, C5, C6, C7, A7, B7 y ±20 c alrededor. Imprime por serie
-     `freq real, freq detectada, error en cents, clarity` y marca si hay error de octava.
-   - **Tiempo**: µs por análisis a cada frecuencia de muestreo (media y máximo de 50 análisis).
-   - **Micro en vivo**: después, captura continua a la frecuencia elegida e imprime unas 10 líneas por segundo
-     con `note, cents, Hz, clarity, rms, analyses/s, loop ms`.
-   - Todo el texto en inglés.
-3. Elegir 16 o 32 kHz con los datos (criterio en §4.1) y anotarlo en `docs/TONEMAP_DESIGN.md`.
-4. Compilar los dos entornos (normal y bench), commit y push. Sin PARADA todavía: la fase 4 se prueba en la misma
-   instalación.
-
-### Fase 4 — Modelo del mapa (`general-purpose`)
-
-1. `tonemap_model` según §3.2–3.4 y §4.4, puro y con `nowMs` como parámetro.
-2. En el bench, pruebas del modelo con resultado `PASS`/`FAIL` por serie:
-   - **Paridad de notas**: de `tonemap.live/tests/fixtures/temperament-vectors.json`, filtrar las filas con
-     `temperament = equal` y `stretch = none` (264 filas, A4 = 440 y 441). Generar con un script de Python
-     (PlatformIO ya trae Python) una cabecera `test/tonemap_vectors.h` con `inputHz, a4, expect.midi,
-     expect.cents, expect.needleEven[0]`. Comprobar midi exacto, cents ±0,01 y posición de aguja ±0,001.
-   - **Color**: errores conocidos por modo → color esperado según §3.3 (casos: dentro de la zona muerta, en el
-     borde, a mitad de rampa, saturado, signo).
-   - **Historia**: secuencias sintéticas (1 s a +10 c y luego 2 s a −10 c) → media esperada para History 1 s, 3 s,
-     30 s y unlimited; tolerancia según la duración de los trozos.
-   - **Desvanecido**: hold 5 s → intensidad a los 4, 10 y 20 s; no fade.
-   - **Re-basado**: cambiar A4 de 442 a 440 con historial a +0 c → la media pasa a ≈ +7,85 c.
-   - **Transposición**: desplazar C → Bb mueve la celda 2 semitonos arriba.
-3. Compilar, commit y push.
-
-**PARADA A**: Sergio instala el firmware de bench (WebUI o USB con permiso) y Claude lee el serie.
-1. Resultados sintéticos y de paridad: todo `PASS`.
-2. Micro en vivo: Sergio toca una escala lenta en su instrumento, notas largas, en C3–C7. Comprobar:
-   - que no hay errores de octava;
-   - que los cents son estables (±2 c en una nota sostenida);
-   - que hay ≥ 25 análisis/s.
-3. Calibrar con Sergio los umbrales de la puerta de ruido (habitación en silencio, hablando, tocando
-   piano/forte) y la claridad.
-4. Anotar los valores medidos en `docs/TONEMAP_DESIGN.md`.
-
-### Fase 5 — Vista e integración (`general-purpose`)
-
-1. `tonemap_view` según §2.2–2.8: cuadrícula, celda activa, aguja, franja, mensajes, teclas, LED (con el brillo),
-   pausa.
-2. Integración en `mode_tuner.cpp`, `onReselect` en `ui.h`/`main.cpp`, ajustes en `settings.*` (§4.7).
-3. Entorno `cardputer-adv-tonemap-debug` (`-DTONEMAP_DEBUG`): una línea superpuesta con análisis/s, ms de
-   análisis, ms de dibujo, rms y clarity, y log por serie dos veces por segundo.
-4. Compilar todos los entornos, commit y push.
-
-**PARADA B**: Sergio prueba en el dispositivo con la lista de §6, apartados B. Claude sigue el serie del entorno
-de depuración si Sergio lo instala.
-
-### Fase 6 — Revisión independiente (`general-purpose` recién lanzado, sin editar)
-
-Prompt base:
-> You are reviewing a finished feature you did not write. Do not edit files. Read `docs/TONEMAP_BRIEF.md`,
-> `docs/TONEMAP_DESIGN.md`, `docs/SPEC.md`, `CLAUDE.md` and the diff of branch `feature/tonemap` against `main`.
-> Check: (1) every requirement of brief §2 and §6 is implemented; (2) the formulas match brief §3 and the
-> tonemap.live source; (3) CLAUDE.md rules (English UI text, silent UI, no new deps, classic tuner/metronome/
-> game/About behaviour unchanged); (4) bugs: integer overflow in ms/chunk math, ring buffer indices, NaN/inf on
-> silence, LED/brightness not restored on every exit path, mic/drone state on view and mode switches.
-> Report findings ranked by severity with file:line and a concrete failure scenario.
-
-### Fase 7 — Correcciones y ajuste fino (orquestador)
-
-1. Corregir los hallazgos de la fase 6 y lo que haya salido en la PARADA B.
-2. Compilar, commit y push.
-
-**PARADA C**: prueba final de Sergio con §6 completo.
-1. Marcar las casillas en `docs/SPEC.md`.
-2. Preguntar a Sergio si se fusiona `feature/tonemap` en `main`.
+- **Phase 0 (orchestrator):** `git fetch origin && git checkout feature/tonemap` (rebase on `origin/main` if it advanced since 2026-10-16). Add to `docs/SPEC.md` a section "Tuner — ToneMap view" with §2 and link this brief. References **outside the repo** (e.g. `..\refs\`): `git clone --depth 1 https://github.com/crossrhythm/tonemap.live`; `npm pack pitchy@4.0.1` and unpack it (or https://unpkg.com/pitchy@4.0.1/index.js); M5Unified 0.2.25 sources are in `.pio/libdeps/cardputer-adv/M5Unified` after a `pio run`. Commit `docs: ToneMap section in SPEC`, push.
+- **Phase 1 (`Explore`):** read-only; compare §3 against `tonemap.live/index.html` (functions `tick`, `freqToNoteData`, `getTargetOffsetCents`, `biasRelaxed/Medium/Hard`, `finalizeActiveSegment`, `getRecentWeightedErr`, `rebaseErrRatio`, `updateCellDisplayColor`, `recomputeAllCellColorsAndRender`, `shiftCellStateBySemitones`, `highlightGridCell`, `getNeedleCellPosition`, mode/stain/history constants) and `pitchy/index.js` (`findPitch`, `_nsdf`, `getKeyMaximumIndices`, `refineResultIndex`). Report every wrong or incomplete formula, constant or behavior, quoting the source; say so if all matches. The orchestrator fixes §3 and commits.
+- **Phase 2 (`Plan`):** design the ESP32-S3 implementation following §2–4 and the current code; read M5Unified `Mic_Class` to confirm the two-slot queue and pick the capture scheme. Deliver: files with responsibilities and public interfaces; map data structures with byte counts (≤ 40 KB, no PSRAM); capture/analysis/draw schedule inside the existing `loop()` with CPU estimates; exact `onReselect`, settings and `mode_tuner.cpp` changes; bench and debug environments and what they print. Classic tuner, metronome, game, About untouched. Flag contradictions instead of changing the spec. Saved to `docs/TONEMAP_DESIGN.md`; stop to ask Sergio only if the design needs a change to §2 or a new dependency.
+- **Phase 3:** `pitch_mpm` (§3.1/§4.2) and `tonemap_audio` (§4.1). Env `cardputer-adv-tonemap-bench` (`-DTONEMAP_BENCH`) replaces the app at boot: **synthetic precision** (sines and sawtooths with harmonics at 16 and 32 kHz for C2, A2, C3, C4, A4, C5, C6, C7, A7, B7 and ±20 c; prints real freq, detected freq, cents error, clarity; flags octave errors), **timing** (µs per analysis, mean and max of 50), **live mic** (continuous capture, ~10 lines/s with `note, cents, Hz, clarity, rms, analyses/s, loop ms`). All text in English. Choose 16 or 32 kHz from the data (§4.1 criterion) and note it in `TONEMAP_DESIGN.md`. Build both envs, commit, push.
+- **Phase 4:** `tonemap_model` (§3.2–3.4, §4.4), pure, `nowMs` as parameter. Bench tests with `PASS`/`FAIL` per series: **note parity** (from `tonemap.live/tests/fixtures/temperament-vectors.json`, rows with `temperament = equal` and `stretch = none`, 264 rows, A4 = 440 and 441; a Python script generates `test/tonemap_vectors.h` with `inputHz, a4, expect.midi, expect.cents, expect.needleEven[0]`; check exact midi, cents ±0.01, needle position ±0.001); **color** (known errors per mode → expected color of §3.3: inside dead zone, at the edge, mid-ramp, saturated, sign); **history** (1 s at +10 c then 2 s at −10 c → expected mean for History 1 s, 3 s, 30 s, unlimited); **fade** (hold 5 s → intensity at 4, 10, 20 s; no fade); **re-basing** (A4 442 → 440 with history at +0 c → mean ≈ +7.85 c); **transposition** (C → Bb moves the cell 2 semitones up).
+  **STOP A**: Sergio installs the bench firmware (WebUI, or USB with permission); Claude reads serial. (1) Synthetic and parity results all `PASS`. (2) Live mic: Sergio plays a slow scale, long notes, C3–C7; check no octave errors, stable cents (±2 c on a sustained note), ≥ 25 analyses/s. (3) Calibrate noise gate thresholds (silent room, talking, playing piano/forte) and clarity. (4) Record measured values in `TONEMAP_DESIGN.md`.
+- **Phase 5:** `tonemap_view` per §2.2–2.8 (grid, active cell, needle, strip, messages, keys, LED with brightness, pause); integration in `mode_tuner.cpp`, `onReselect` in `ui.h`/`main.cpp`, settings in `settings.*` (§4.7). Env `cardputer-adv-tonemap-debug` (`-DTONEMAP_DEBUG`): an overlaid line with analyses/s, analysis ms, draw ms, rms and clarity, and a serial log twice per second. Build all envs, commit, push.
+  **STOP B**: Sergio tests on the device with the list of §6 B; Claude follows the debug env's serial if installed.
+- **Phase 6 (new `general-purpose`, no edits):** review a finished feature it did not write. Read this brief, `TONEMAP_DESIGN.md`, `SPEC.md`, `CLAUDE.md` and the diff of `feature/tonemap` vs `main`. Check: (1) every requirement of §2 and §6 implemented; (2) formulas match §3 and the tonemap.live source; (3) CLAUDE.md rules (English UI text, silent UI, no new deps, classic tuner/metronome/game/About unchanged); (4) bugs: integer overflow in ms/chunk math, ring buffer indices, NaN/inf on silence, LED/brightness not restored on every exit path, mic/drone state on view and mode switches. Report findings ranked by severity with file:line and a concrete failure scenario.
+- **Phase 7 (orchestrator):** fix phase 6 findings and whatever STOP B revealed; build, commit, push. **STOP C**: Sergio's final test with all of §6; tick the boxes in `docs/SPEC.md`; ask Sergio whether to merge `feature/tonemap` into `main`.
 
 ---
 
-## 6. Criterios de aceptación
+## 6. Acceptance criteria
 
-**A. Bench (serie)**
-- [ ] Paridad de notas con el fixture de ToneMap: 264/264 filas `PASS`.
-- [ ] Sintético: sin errores de octava de C2 a B7 (sinusoidal y diente de sierra); error ≤ ±1 c de C2 a C6 y
-      ≤ ±3 c en la octava 7 (o "best effort" documentado).
-- [ ] Análisis completo en < 20 ms y ≥ 25 análisis/s en vivo con la pantalla dibujando.
-- [ ] Pruebas de color, historia, desvanecido, re-basado y transposición: `PASS`.
+**A. Bench (serial)**
+- [ ] Note parity with the ToneMap fixture: 264/264 rows `PASS`.
+- [ ] Synthetic: no octave errors from C2 to B7 (sine and sawtooth); error ≤ ±1 c from C2 to C6 and ≤ ±3 c in octave 7 (or documented "best effort").
+- [ ] Full analysis in < 20 ms and ≥ 25 analyses/s live with the screen drawing.
+- [ ] Color, history, fade, re-basing and transposition tests: `PASS`.
 
-**B. En el dispositivo (Sergio)**
-- [ ] `T` dentro del afinador alterna las vistas; al volver de otro modo se abre la última usada (también tras
-      reiniciar).
-- [ ] Una escala lenta pinta cada nota en su celda; una nota tocada adrede alta se tiñe de naranja, baja de azul,
-      centrada de verde.
-- [ ] La aguja de la celda activa sigue un vibrato; los cents de la franja se ponen verdes al centrar.
-- [ ] `S`, `H`, `C`, `N`, `K`, `F`, `L`, `R` y `Space` hacen lo de §2.5, muestran su mensaje y se recuerdan tras
-      reiniciar.
-- [ ] Arriba/Abajo cambian la La y es la misma que en la vista clásica. El mapa se re-puntúa al cambiarla.
-- [ ] En silencio no se pinta nada con la puerta en `Low`; hablando cerca, poco o nada con `High`.
-- [ ] El mapa sigue ahí tras ir al metrónomo y volver; `R` lo borra.
-- [ ] LED verde al centrar, apagado si no. Con `L` off o al salir, el brillo vuelve al del usuario.
-- [ ] Sin sonidos al pulsar teclas. Todo el texto en inglés.
-- [ ] La vista clásica, el drone, el metrónomo, el juego y About funcionan exactamente igual que antes.
+**B. On the device (Sergio)**
+- [ ] `T` inside the tuner toggles views; returning from another mode opens the last used (also after reboot).
+- [ ] A slow scale paints each note in its cell; a deliberately high note tints orange, low blue, centered green.
+- [ ] The active cell's needle follows a vibrato; the strip's cents turn green when centered.
+- [ ] `S`, `H`, `C`, `N`, `K`, `F`, `L`, `R` and `Space` do what §2.5 says, show their message and are remembered after reboot.
+- [ ] Up/Down change A and it is the same as in the classic view. The map is re-scored when it changes.
+- [ ] In silence nothing is painted with the gate at `Low`; talking close, little or nothing with `High`.
+- [ ] The map is still there after going to the metronome and back; `R` clears it.
+- [ ] Green LED when centered, off otherwise. With `L` off or on exit, brightness returns to the user's.
+- [ ] No sounds on key presses. All text in English.
+- [ ] Classic view, drone, metronome, game and About work exactly as before.
 
 ---
 
-## 7. Riesgos conocidos
+## 7. Known risks
 
-- **Graves del micro integrado:** puede que no capte bien por debajo de ~C3. Lo dice la PARADA A. Si falla, la
-  fila C2 se queda vacía, pero la cuadrícula sigue siendo C2–B7, como pidió Sergio.
-- **Octava 7 a 16 kHz:** imprecisa. De ahí la medición de 32 kHz.
-- **CPU:** detector de rango completo + dibujo + 30 análisis/s pueden ahogar el bucle. Las salidas están en §4.2
-  y §4.5.
-- **LED y brillo:** el brillo debe restaurarse en todos los caminos de salida (cambio de vista, de modo, `L`).
-- **Huecos de captura:** si la cola de dos grabaciones de M5Unified no se mantiene llena, los `dt` serán
-  irregulares. El bench lo detecta con análisis/s.
+- **Built-in mic bass:** may not pick up well below ~C3. STOP A will tell. If it fails, the C2 row stays empty but the grid is still C2–B7, as Sergio asked.
+- **Octave 7 at 16 kHz:** imprecise; hence the 32 kHz measurement.
+- **CPU:** full-range detector + drawing + 30 analyses/s may choke the loop. Outs are in §4.2 and §4.5.
+- **LED and brightness:** brightness must be restored on every exit path (view change, mode change, `L`).
+- **Capture gaps:** if M5Unified's two-recording queue is not kept full, `dt` will be irregular. The bench detects it with analyses/s.
 
-## 8. Decisiones de la conversación (2026-10-16)
+## 8. Decisions from the conversation (2026-10-16)
 
-- Alcance v1: núcleo + ajustes básicos (sensibilidad, History, Color hold) + puerta de ruido, transposición,
-  sostenidos/bemoles y LED.
-- Instrumento principal: cuerda / viento agudo.
-- Pantalla: 6 octavas C2–B7 con franja de información; etiquetas solo con la nota (octava en la columna C).
-- Entrada: `T` alterna dentro del afinador; se recuerda la última vista.
-- Ajustes con una tecla cada uno; `R` borra; Arriba/Abajo cambian la La.
-- El mapa dura mientras el dispositivo está encendido.
-- LED con tecla `L`, encendido por defecto.
-- Ejecución por fases con paradas; brief en el repo (rama) y en el proyecto de claude.ai.
-- Decidido por Claude (cambiable): `Space` = pausa; Izquierda/Derecha sin uso; la barra sigue diciendo `Tuner`;
-  puerta por defecto `Low`; transposiciones C/Bb/Eb/F con los valores de ToneMap.
+- v1 scope: core + basic settings (sensitivity, History, Color hold) + noise gate, transposition, sharps/flats and LED.
+- Main instrument: strings / high winds.
+- Screen: 6 octaves C2–B7 with info strip; labels only the note (octave in the C column).
+- Entry: `T` toggles inside the tuner; the last view is remembered.
+- One key per setting; `R` clears; Up/Down change A.
+- The map lasts while the device is on.
+- LED with key `L`, on by default.
+- Execution by phases with stops; brief in the repo (branch) and in the claude.ai project.
+- Decided by Claude (changeable): `Space` = pause; Left/Right unused; the bar still says `Tuner`; default gate `Low`; transpositions C/Bb/Eb/F with ToneMap's values.
 
-## 9. Cambios tras pruebas en dispositivo (2026-10-22)
+## 9. Changes after device tests (2026-10-22)
 
-Sergio probó la vista en el Cardputer ADV y pidió un mapa más legible de un vistazo. Cambios deliberados respecto a
-tonemap.live y a las secciones anteriores (el detalle y la justificación están en `TONEMAP_DESIGN.md` §13):
+Sergio tested the view on the Cardputer ADV and asked for a map more readable at a glance. Deliberate differences from tonemap.live and the sections above (detail and reasons in `TONEMAP_DESIGN.md` §13):
 
-- **Celda activa:** el borde blanco interior de 2 px tapaba demasiado de la celda de 20 × 18 px; ahora (segunda tanda, 2026-10-22)
-  el blanco es exclusivo de la celda activa: una barra blanca de 2 px sobre el borde inferior de la celda y la etiqueta en
-  blanco (sin esquinas, contorno ni sombra); las demás etiquetas, negro o gris claro `(190,190,190)` por luminancia. La línea de
-  referencia negra de 2 px y la aguja no cambian (la aguja se dibuja después de la barra).
-- **Paletas** (§2.3, sustituye a la paleta fija): `Safe` (por defecto; azul – casi blanco – naranja, pensada para
-  daltonismo y con la luminancia ordenada centro > alto > bajo) y `Extreme` (antes `Classic`; primarios puros en un único degradado
-  continuo: azul en el extremo bajo, verde justo en el centro, rojo en el alto, sin meseta ni saltos —`t_lin` lineal sobre todo
-  el rango, ±15,5 c en Medium— y sin atenuar por debajo del 75 %, ver `TONEMAP_DESIGN.md` §13.7). Tecla `P`, ajuste `tmPal`, mensaje `Palette: Safe` / `Palette: Extreme`.
-  Las etiquetas de las celdas tocadas pasan a negro o gris claro según la luminancia del color mostrado (blanco solo en la celda activa).
-- **Rampa más estrecha** (§3.3): `span` = 2·dz en Relaxed y Medium, 4·dz en Hard (antes 4, 4 y 8). Color pleno desde
-  ±18,5 c (Relaxed), ±15,5 c (Medium) y ±10,1 c (Hard); la zona de centro puro no cambia (±6,2 / ±5,2 / ±2,0 c).
-- **Intensidad plena a los 250 ms** de sonido (`FULL_CONF_MS`, antes 500) y **suelo del desvanecido 0,45**
-  (`STAIN_MIN_FRACTION`, antes 0,25) (§3.4).
-- El firmware normal (`cardputer-adv`) no tiene ninguna línea ni superposición de depuración: eso solo existe en
-  `cardputer-adv-tonemap-debug`.
-- **Panel de opciones** (2026-10-22, segunda tanda): `Alt` o `Enter` abre/cierra una superposición a pantalla completa con las
-  teclas y sus valores actuales (`SPEC.md`, `TONEMAP_DESIGN.md` §13.5). Pista `Alt:menu` en la franja de info cuando cabe.
-- **Cents y LED con el color vivo** (2026-10-22, tercera tanda): el texto de cents de la franja y el LED muestran el color de la
-  desviación instantánea de la nota que suena, en la paleta activa (Safe: con zona muerta; Extreme: degradado continuo), a
-  intensidad plena. Sustituye al "texto verde / LED verde dentro de la zona muerta" de §2.4 y §2.8 (`TONEMAP_DESIGN.md` §13.8).
+- **Active cell:** the inner white 2 px border covered too much of the 20 × 18 px cell; now (second batch, 2026-10-22) white is exclusive to the active cell: a 2 px white bar on the cell's bottom edge and the label in white (no corners, outline or shadow); other labels black or light gray `(190,190,190)` by luminance. The black 2 px reference line and the needle do not change (the needle is drawn after the bar).
+- **Palettes** (§2.3, replaces the fixed palette): `Safe` (default; blue – near white – orange, for color blindness, luminance ordered center > high > low) and `Extreme` (formerly `Classic`; pure primaries in one continuous gradient: blue at the low end, green exactly at the center, red at the high end, no plateau or jumps — linear `t_lin` over the whole range, ±15.5 c in Medium — and no dimming below 75 %, see `TONEMAP_DESIGN.md` §13.7). Key `P`, setting `tmPal`, message `Palette: Safe` / `Palette: Extreme`. Labels of touched cells become black or light gray by the shown color's luminance (white only in the active cell).
+- **Narrower ramp** (§3.3): `span` = 2·dz in Relaxed and Medium, 4·dz in Hard (formerly 4, 4 and 8). Full color from ±18.5 c (Relaxed), ±15.5 c (Medium) and ±10.1 c (Hard); the pure-center zone is unchanged (±6.2 / ±5.2 / ±2.0 c).
+- **Full intensity at 250 ms** of sound (`FULL_CONF_MS`, formerly 500) and **fade floor 0.45** (`STAIN_MIN_FRACTION`, formerly 0.25) (§3.4).
+- The normal firmware (`cardputer-adv`) has no debug line or overlay: that only exists in `cardputer-adv-tonemap-debug`.
+- **Options panel** (2026-10-22, second batch): `Alt` or `Enter` toggles a full-screen overlay with the keys and their current values (`SPEC.md`, `TONEMAP_DESIGN.md` §13.5). `Alt:menu` hint in the info strip when it fits.
+- **Cents and LED in live color** (2026-10-22, third batch): the strip's cents text and the LED show the color of the sounding note's instantaneous deviation, in the active palette (Safe: with dead zone; Extreme: continuous gradient), at full intensity. Replaces the "green text / green LED inside the dead zone" of §2.4 and §2.8 (`TONEMAP_DESIGN.md` §13.8).
