@@ -1,4 +1,4 @@
-# METROTONOPITECUS
+﻿# METROTONOPITECUS
 
 Welcome to my first project for the Cardputer ADV. It is also a development of the software that will allow me later on to build my own metronomes based on the ESP32-S3. So, in theory, it will be just "copy and paste" and solder the components separately. It is already going to be more complicated than that because for sure I will upgrade the microphone to get a better accuracy on the lower and higher part of the register.
 
@@ -44,3 +44,10 @@ Many thanks to the folks of https://tonemap.live for sharing their code on GitHu
 It is the same logic as the original [Tonemap](https://tonemap.live), but translated for the microcontroller, since the original code is written in HTML. For now all the basic options + transposing notes + a second palette of colours (a bit more radical and not made for colour-blind people) are included.
 
 Next on the roadmap is to also adopt the different temperaments, that could be very useful for baroque and curious people.
+
+
+---
+
+## License
+
+Metrotonopitecus is released under the [MIT License](LICENSE). The Tonemap view and the pitch detector are ported from [Tonemap](https://tonemap.live) and pitchy, which have their own licenses: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
